@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.dnska</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/rokkerruslan/go/bin/dnska</string>
+		<string>app</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/rokkerruslan/go/bin/stderr.log</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/rokkerruslan/go/bin/stdout.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/rokkerruslan/w/dnska</string>
+</dict>
+</plist>
