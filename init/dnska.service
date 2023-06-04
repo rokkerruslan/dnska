@@ -1,0 +1,10 @@
+[Unit]
+Description=Dnska
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/app/dnska
+
+[Install]
+WantedBy=multi-user.target
