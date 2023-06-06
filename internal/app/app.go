@@ -112,8 +112,10 @@ func (efc endpointsFileConfigurationV0) InstantiateEndpoints(l zerolog.Logger) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve local addr: %v", err)
 	}
+	tcpLocalAddr := udpLocalAddr
 
-	return []endpoints2.Endpoint{endpoints2.NewUDPEndpoint(udpLocalAddr, resolver, l)}, nil
+	endpoints := []endpoints2.Endpoint{endpoints2.NewUDPEndpoint(udpLocalAddr, resolver, l), endpoints2.NewTCPEndpoint(tcpLocalAddr, resolver, l)}
+	return endpoints, nil
 }
 
 func setup(l zerolog.Logger, endpointsFilePath string) ([]endpoints2.Endpoint, error) {
