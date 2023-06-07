@@ -3,7 +3,6 @@ package endpoints
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -39,12 +38,13 @@ func (t *TCPEndpoint) Name() string {
 	return "tcp"
 }
 
-func (t *TCPEndpoint) Start(onStop func()) error {
+func (t *TCPEndpoint) Start(onStop func()) {
 	t.onStop = onStop
 
 	listener, err := net.ListenTCP("tcp", net.TCPAddrFromAddrPort(t.addr))
 	if err != nil {
-		return fmt.Errorf("tcp :: failed to listen :: error=%v", err)
+		t.l.Printf("tcp :: failed to listen :: error=%v", err)
+		return
 	}
 
 	defer func() {
@@ -59,7 +59,7 @@ func (t *TCPEndpoint) Start(onStop func()) error {
 	for {
 		select {
 		case <-t.exit:
-			return nil
+			return
 		default:
 			// nop
 		}
