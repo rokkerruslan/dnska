@@ -1,81 +1,104 @@
 package ext
 
-// We begin by supposing that we have a b-byte message as input, and
-// that we wish to find its message digest. Here b is an arbitrary
-// non-negative integer; b may be zero, and it may be arbitrarily large.
-// We imagine the bytes of the message written down as follows:
-// m_0 m_1 ... m_{b-1}
-// The following five steps are performed to compute the message digest
-// of the message.
-
 func Encode(in []byte) []byte {
+	ctx := NewMD2()
 
-	// Step 1. Append Padding Bytes
-	//
-	// The message is "padded" (extended) so that its length (in bytes) is
-	// congruent to 0, modulo 16. That is, the message is extended so that
-	// it is a multiple of 16 bytes long. Padding is always performed, even
-	// if the length of the message is already congruent to 0, modulo 16.
+	ctx.Update(in)
 
-	rem := len(in) % 16
-	in = append(in, padding[16-rem]...)
+	out := [16]byte{}
 
-	// Step 2. Append Checksum
-	//
-	//A 16-byte checksum of the message is appended to the result of the
-	//previous step.
-	//
-	//	This step uses a 256-byte "random" permutation constructed from the
-	// digits of pi. Let S[i] denote the i-th element of this table. The
-	// table is given in the appendix.
+	ctx.Final(out[:])
 
-	C := [16]uint8{}
+	return out[:]
+}
 
-	l := uint8(0)
+func EncodeString(in string) string {
+	ctx := NewMD2()
 
-	for i := 0; i < (len(in) / 16); i++ {
-		for j := 0; j < 16; j++ {
-			c := in[i*16+j]
-			C[j] = C[j] ^ pi[c^l]
-			l = C[j]
+	ctx.Update([]byte(in))
+
+	out := [16]byte{}
+
+	ctx.Final(out[:])
+
+	return string(out[:])
+}
+
+type MD2 struct {
+	state    [16]byte
+	checksum [16]byte
+	count    uint64   // number of bytes, modulo 16
+	buf      [16]byte // non processed data
+}
+
+func NewMD2() *MD2 {
+	return &MD2{}
+}
+
+func (md2 *MD2) Update(in []byte) {
+	md2.update(in)
+}
+
+func (md2 *MD2) Final(out []byte) {
+	index := md2.count
+	padLen := 16 - index
+
+	md2.update(padding[padLen])
+	md2.update(md2.checksum[:])
+
+	copy(out[:16], md2.state[:])
+}
+
+func (md2 *MD2) update(in []byte) {
+	index := md2.count
+	md2.count = (index + uint64(len(in))) & 15
+	remain := 16 - index
+
+	var i uint64
+	if uint64(len(in)) >= remain {
+		copy(md2.buf[index:], in[:remain])
+		transform(md2.state[:], md2.checksum[:], md2.buf[:])
+
+		for i = remain; (i + 15) < uint64(len(in)); i += 16 {
+			transform(md2.state[:], md2.checksum[:], in[i:])
 		}
+		index = 0
+	} else {
+		i = 0
 	}
 
-	in = append(in, C[:]...)
+	// Copy remaining input
+	copy(md2.buf[index:], in[i:])
+}
 
-	// Step 3. Initialize MD Buffer
+func transform(state, checksum, block []byte) {
+	x := [48]uint8{}
 
-	buf := [48]uint8{}
-
-	// Step 4. Process Message in 16-Byte Blocks
-
-	// Process each 16-word block.
-	for i := 0; i < (len(in) / 16); i++ {
-
-		// Copy block i into X.
-		for j := 0; j < 16; j++ {
-			buf[16+j] = in[i*16+j]
-			buf[32+j] = buf[16+j] ^ buf[j]
-		}
-
-		t := uint8(0)
-
-		// Do 18 rounds.
-		for j := uint8(0); j < 18; j++ {
-
-			// Round j.
-			for k := 0; k < 48; k++ {
-				buf[k] ^= pi[t]
-				t = buf[k]
-			}
-
-			t = t+j // % 256
-		}
+	for i := 0; i < 16; i++ {
+		x[i] = state[i]
+		x[i+16] = block[i]
+		x[i+16*2] = state[i] ^ block[i]
 	}
 
-	// Step 5. Output
+	t := uint8(0)
+	for i := uint8(0); i < 18; i++ {
+		for j := range x {
+			x[j] ^= pi[t]
+			t = x[j]
+		}
 
-	return buf[0:16]
+		t = t + i // wrap around
+	}
+
+	for i := range state {
+		state[i] = x[i]
+	}
+
+	t = checksum[15]
+	for i := range checksum {
+		checksum[i] = checksum[i] ^ pi[block[i]^t]
+		t = checksum[i]
+	}
 }
 
 var padding = [][]byte{
@@ -98,6 +121,8 @@ var padding = [][]byte{
 	[]byte("\020\020\020\020\020\020\020\020\020\020\020\020\020\020\020\020"),
 }
 
+// pi is Permutation of 0..255 constructed from the digits of pi. It
+// gives a "random" nonlinear byte substitution operation.
 var pi = [256]byte{
 	41, 46, 67, 201, 162, 216, 124, 1, 61, 54, 84, 161, 236, 240, 6,
 	19, 98, 167, 5, 243, 192, 199, 115, 140, 152, 147, 43, 217, 188,
