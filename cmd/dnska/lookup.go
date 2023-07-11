@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/rokkerruslan/dnska/internal/resolve"
@@ -15,11 +15,12 @@ import (
 	"github.com/rokkerruslan/dnska/pkg/query"
 )
 
-func NewLookupCommand(l zerolog.Logger) *cobra.Command {
+func NewLookupCommand(l *slog.Logger) *cobra.Command {
 	var opts struct {
-		Type                    uint16
+		Type                    string
 		Class                   uint16
 		Addr                    string
+		Stub                    bool
 		OnlyAnswer              bool
 		SetRecursionDesiredFlag bool
 		DumpMalformedPackets    bool
@@ -27,7 +28,7 @@ func NewLookupCommand(l zerolog.Logger) *cobra.Command {
 
 	cmd := cobra.Command{
 		Use:          "lookup [NAME]",
-		Short:        "Use stub resolver",
+		Short:        "Use resolver",
 		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -42,9 +43,7 @@ func NewLookupCommand(l zerolog.Logger) *cobra.Command {
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 			defer cancel()
 
-			var message proto.Message
-
-			in := query.AddQuestion(query.NewTemplate(), name, proto.QType(opts.Type), proto.QClass(opts.Class))
+			in := query.AddQuestion(query.NewTemplate(), name, proto.ParseQType(opts.Type), proto.QClass(opts.Class))
 
 			// todo: do not ignore opts.SetRecursionDesiredFlag
 			if opts.SetRecursionDesiredFlag {
@@ -57,19 +56,14 @@ func NewLookupCommand(l zerolog.Logger) *cobra.Command {
 				L:                    l,
 			})
 
-			message, err = resolver.Resolve(ctx, in)
+			in2 := proto.FromProtoMessage(in)
 
-			//if opts.SetRecursionDesiredFlag {
-			//} else {
-			//	message, err = resolve.LookupIterative(ctx, resolve.LookupOpts{
-			//		Name:              name,
-			//		Type:              proto.QType(opts.Type),
-			//		Class:             proto.ClassIN,
-			//		ID:                1,
-			//		DumpUnknownPacket: true,
-			//		L:                 l,
-			//	})
-			//}
+			message2, err := resolver.Resolve(ctx, in2)
+			if err != nil {
+				return err
+			}
+
+			message := message2.ToProtoMessage()
 
 			if err != nil {
 				return fmt.Errorf("failed to lookup :: name=%s error=%v", name, err)
@@ -85,7 +79,7 @@ func NewLookupCommand(l zerolog.Logger) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().Uint16VarP(&opts.Type, "type", "t", uint16(proto.QTypeA), "record type")
+	cmd.Flags().StringVarP(&opts.Type, "type", "t", proto.QTypeA.String(), "record type")
 	cmd.Flags().Uint16VarP(&opts.Class, "class", "c", uint16(proto.ClassIN), "record class")
 
 	cmd.Flags().StringVarP(&opts.Addr, "addr", "a", "1.1.1.1:53",
@@ -95,6 +89,8 @@ func NewLookupCommand(l zerolog.Logger) *cobra.Command {
 
 	cmd.Flags().BoolVarP(&opts.SetRecursionDesiredFlag, "recursion-desired", "r", false,
 		"set to 1 the recursion desired bit flag in request message")
+
+	cmd.Flags().BoolVarP(&opts.Stub, "stub", "s", true, "stub mode")
 
 	return &cmd
 }

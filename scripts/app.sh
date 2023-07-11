@@ -4,6 +4,8 @@
 # Static variables
 # =============================================================
 
+CMD_PATH=./cmd/dnska
+
 BuildVersion=$(git describe --tags)
 BuildTimestamp=$(date +%s)
 BuildHost=$(hostname)
@@ -31,7 +33,11 @@ END
 # =============================================================
 
 install() {
-  go install -tags netgo -ldflags="${LD_FLAGS}" ./cmd/dnska
+  GGO_ENABLED=0 go install -tags netgo -ldflags="${LD_FLAGS}" $CMD_PATH
+}
+
+build() {
+  CGO_ENABLED=0 go build -tags netgo -ldflags="${LD_FLAGS}" $CMD_PATH
 }
 
 # =============================================================
@@ -48,7 +54,7 @@ USAGE
 COMMANDS
 
   install          install binary to GOBIN path
-  update.blacklist download black list ads domains from github
+  build            build binary and store in current directory
   help             print this docs
 
 EXAMPLES
@@ -68,6 +74,9 @@ fi
 case $1 in
 i | install)
   install
+  ;;
+b | build)
+  build
   ;;
 h | help | "")
   echo "$USAGE"

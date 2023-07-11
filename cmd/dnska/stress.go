@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/rokkerruslan/dnska/internal/resolve"
@@ -79,7 +79,7 @@ func stress(opts stressOpts) error {
 			defer wg.Done()
 			timer := time.NewTimer(opts.Duration)
 
-			logger := zerolog.New(io.Discard)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 			totalRequests := 0
 			totalErrors := 0
@@ -117,7 +117,7 @@ func stress(opts stressOpts) error {
 					},
 				}
 
-				_, err := resolver.Resolve(context.Background(), in)
+				_, err := resolver.Resolve(context.Background(), proto.FromProtoMessage(in))
 				if err != nil {
 					totalErrors++
 				}

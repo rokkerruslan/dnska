@@ -8,6 +8,42 @@ import (
 	testing2 "github.com/rokkerruslan/dnska/testing"
 )
 
+func TestParseQType(t *testing.T) {
+
+	cases := []struct {
+		in  string
+		out QType
+	}{
+		{in: "A", out: QTypeA},
+		{in: "NS", out: QTypeNS},
+		{in: "MD", out: QTypeMD},
+		{in: "MF", out: QTypeMF},
+		{in: "CNAME", out: QTypeCName},
+		{in: "SOA", out: QTypeSOA},
+		{in: "MB", out: QTypeMB},
+		{in: "MG", out: QTypeMG},
+		{in: "MR", out: QTypeMR},
+		{in: "NULL", out: QTypeNULL},
+		{in: "WKS", out: QTypeWKS},
+		{in: "HINFO", out: QTypeHINFO},
+		{in: "MINFO", out: QTypeMINFO},
+		{in: "TXT", out: QTypeTXT},
+		{in: "AAAA", out: QTypeAAAA},
+		{in: "AXFR", out: QTypeAXFR},
+		{in: "MAILB", out: QTypeMAILB},
+		{in: "MAILA", out: QTypeMAILA},
+		{in: "ALL", out: QTypeALL},
+		{in: "", out: QTypeUnknown},
+		{in: "invalid", out: QTypeUnknown},
+	}
+
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			testing2.Assert(t, ParseQType(c.in), c.out)
+		})
+	}
+}
+
 func TestDecodeEncodeMessage(t *testing.T) {
 	t.Run("standard-query.query.A.google.com", func(t *testing.T) {
 		buf, err := os.ReadFile("testdata/standard-query.query.A.google.com")
@@ -520,6 +556,18 @@ func TestDecodeEncodeMessage(t *testing.T) {
 
 		testing2.ThisIsFine(t, err)
 		testing2.Assert(t, decoded, want)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		buf, err := os.ReadFile("testdata/broken.no.five.ending.bytes.v0")
+		testing2.FailIfError(t, err)
+
+		dec := NewDecoder()
+		_, err = dec.Decode(buf)
+
+		if err == nil {
+			t.Error("no error")
+		}
 	})
 }
 

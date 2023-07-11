@@ -7,9 +7,5 @@ import (
 )
 
 type Resolver interface {
-	Resolve(context.Context, proto.Message) (proto.Message, error)
-}
-
-type ResolverV2 interface {
-	ResolveV2(context.Context, proto.Question) (proto.Message, error)
+	Resolve(context.Context, *proto.InternalMessage) (*proto.InternalMessage, error)
 }

@@ -7,3 +7,5 @@
 # Temporary files with compiled tests
 /*.test
 /dump
+
+/main.go

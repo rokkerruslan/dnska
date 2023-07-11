@@ -32,25 +32,18 @@ var answerFuckOff = proto.ResourceRecord{
 	RData:    "127.0.0.1",
 }
 
-func (b *BlacklistResolver) Resolve(ctx context.Context, in proto.Message) (proto.Message, error) {
-	q := in.Question[0]
+func (b *BlacklistResolver) Resolve(ctx context.Context, in *proto.InternalMessage) (*proto.InternalMessage, error) {
+	q := in.Question
 
 	if _, ok := b.blacklist[q.Name]; ok {
-		out := proto.Message{
-			Header: proto.Header{
-				ID:                 in.Header.ID,
-				Response:           true,
-				RecursionAvailable: true,
-				RCode:              proto.RCodeNoErrorCondition,
-				ANCount:            1,
-			},
-			Question:   in.Question,
+		out := proto.InternalMessage{
+			Question:   q,
 			Answer:     []proto.ResourceRecord{answerFuckOff},
 			Authority:  nil,
 			Additional: nil,
 		}
 
-		return out, nil
+		return &out, nil
 	}
 
 	return b.pass.Resolve(ctx, in)

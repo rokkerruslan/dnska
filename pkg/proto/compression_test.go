@@ -17,7 +17,7 @@ func TestLabelsIndex_EncodeName(t *testing.T) {
 
 	index := labelsIndex{}
 
-	buf := bv.NewByteView(make([]byte, limits.UDPPayloadSizeLimit))
+	buf := bv.NewByteView(make([]byte, limits.DefaultUDPPayloadSizeLimit))
 
 	if err := index.EncodeName(buf, s0); err != nil {
 		t.Fatal(err)
@@ -120,5 +120,5 @@ func TestExample2(t *testing.T) {
 
 	t.Log(spew.Sdump(b.Bytes()))
 
-	testing2.Assert(t, b.Bytes(), total)
+	testing2.Assert(t, len(b.Bytes()), total)
 }

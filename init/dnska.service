@@ -1,10 +1,12 @@
 [Unit]
-Description=Dnska
+Description=Toy implementation of DNS
 Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/app/dnska
+ExecStart=/home/r/go/bin/dnska app
+WorkingDirectory=/home/r/w/dnska
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target

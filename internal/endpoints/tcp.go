@@ -4,17 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/rokkerruslan/dnska/internal/resolve"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l zerolog.Logger) *TCPEndpoint {
+func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l *slog.Logger) *TCPEndpoint {
 	return &TCPEndpoint{
 		addr:     addr,
 		resolver: resolver,
@@ -25,10 +24,9 @@ func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l zerolog.Lo
 }
 
 type TCPEndpoint struct {
-	addr      netip.AddrPort
-	resolver  resolve.Resolver
-	resolver2 resolve.ResolverV2
-	l         zerolog.Logger
+	addr     netip.AddrPort
+	resolver resolve.Resolver
+	l        *slog.Logger
 
 	exit   chan struct{}
 	onStop func()
@@ -43,18 +41,18 @@ func (t *TCPEndpoint) Start(onStop func()) {
 
 	listener, err := net.ListenTCP("tcp", net.TCPAddrFromAddrPort(t.addr))
 	if err != nil {
-		t.l.Printf("tcp :: failed to listen :: error=%v", err)
+		t.l.Error("tcp :: failed to listen :: error=%v", err)
 		return
 	}
 
 	defer func() {
 		closeErr := listener.Close()
 		if closeErr != nil {
-			t.l.Printf("tcp :: failed to close connection :: error=%v", closeErr)
+			t.l.Error("tcp :: failed to close connection :: error=%v", closeErr)
 		}
 	}()
 
-	t.l.Printf("tcp :: starts on %v | %v", listener.Addr(), t.addr)
+	t.l.Error("tcp starts", "addr", listener.Addr())
 
 	for {
 		select {
@@ -66,7 +64,7 @@ func (t *TCPEndpoint) Start(onStop func()) {
 
 		conn, err := listener.AcceptTCP()
 		if err != nil {
-			t.l.Printf("tcp :: failed to establish connection :: error=%v", err)
+			t.l.Error("tcp :: failed to establish connection :: error=%v", err)
 			continue
 		}
 
@@ -77,14 +75,14 @@ func (t *TCPEndpoint) Start(onStop func()) {
 
 func (t *TCPEndpoint) step(conn *net.TCPConn) {
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-		t.l.Printf("tcp :: failed to set deadline :: error=%v", err)
+		t.l.Error("tcp :: failed to set deadline :: error=%v", err)
 		return
 	}
 
 	var length uint16
 	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
 		packetReadErrorsTotal.Inc()
-		t.l.Printf("tcp :: failed to read length field :: error=%v", err)
+		t.l.Error("tcp :: failed to read length field :: error=%v", err)
 		return
 	}
 
@@ -96,7 +94,7 @@ func (t *TCPEndpoint) step(conn *net.TCPConn) {
 		}
 
 		packetReadErrorsTotal.Inc()
-		t.l.Printf("tcp :: failed to read data :: error=%v", err)
+		t.l.Error("tcp :: failed to read data :: error=%v", err)
 		return
 	}
 
@@ -107,25 +105,36 @@ func (t *TCPEndpoint) step(conn *net.TCPConn) {
 	inMsg, err := dec.Decode(buf)
 	if err != nil {
 		packetDecodeErrorsTotal.Inc()
-		t.l.Printf("tcp :: failed to decode message :: error=%v", err)
+		t.l.Error("tcp :: failed to decode message :: error=%v", err)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	outMsg, err := t.resolver.Resolve(ctx, inMsg)
+	inMsg2 := proto.FromProtoMessage(inMsg)
+
+	outMsg, err := t.resolver.Resolve(ctx, inMsg2)
 	if err != nil {
-		t.l.Printf("tcp :: failed to lookup :: error=%v", err)
+		t.l.Error("tcp :: failed to lookup :: error=%v", err)
 		return
 	}
 
+	outMsg2 := outMsg.ToProtoMessage()
+
+	outMsg2.Header.ID = inMsg.Header.ID
+
+	// todo: move to different abstraction layer
+	outMsg2.Header.Response = true
+	outMsg2.Header.RecursionAvailable = true
+	outMsg2.Header.RecursionDesired = inMsg.Header.RecursionDesired
+
 	enc := proto.NewEncoder(make([]byte, 512))
 
-	dataBuf, err := enc.Encode(outMsg)
+	dataBuf, err := enc.Encode(outMsg.ToProtoMessage())
 	if err != nil {
 		packetEncodeErrorsTotal.Inc()
-		t.l.Printf("tcp :: failed to encode message :: error=%v", err)
+		t.l.Error("tcp :: failed to encode message :: error=%v", err)
 		return
 	}
 
@@ -134,16 +143,20 @@ func (t *TCPEndpoint) step(conn *net.TCPConn) {
 	copy(outBuf[2:], dataBuf)
 
 	if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		t.l.Printf("tcp :: failed to set write deadline :: error=%v", err)
+		t.l.Error("tcp :: failed to set write deadline :: error=%v", err)
 		return
 	}
 	if _, err := conn.Write(outBuf); err != nil {
-		t.l.Printf("tcp :: failed to write :: error=%v", err)
+		t.l.Error("tcp :: failed to write :: error=%v", err)
 		packetWriteErrorsTotal.Inc()
 		return
 	}
 
-	t.l.Printf("trace :: tcp :: total time is %v :: q=%s", time.Since(startTs), inMsg.Question[0].Name)
+	t.l.Info(
+		"done",
+		slog.Duration("total", time.Since(startTs)),
+		slog.String("name", inMsg2.Question.Name),
+	)
 
 	successesProcessedOpsTotal.Inc()
 }

@@ -3,13 +3,13 @@ package bucket
 import (
 	"encoding/gob"
 	"errors"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/rs/zerolog"
 )
 
 // todo: Add cache for availability to cache
@@ -22,7 +22,7 @@ import (
 type Bucket struct {
 	path    string
 	verbose bool
-	l       zerolog.Logger
+	l       *slog.Logger
 
 	mu      sync.Mutex
 	entries map[string]holder
@@ -31,7 +31,7 @@ type Bucket struct {
 type Opts struct {
 	Path    string
 	Verbose bool
-	L       zerolog.Logger
+	L       *slog.Logger
 }
 
 func New(opts Opts) *Bucket {
@@ -129,7 +129,7 @@ func (b *Bucket) Dump() error {
 
 func (b *Bucket) trace(format string, a ...interface{}) {
 	if b.verbose {
-		b.l.Printf(format, a...)
+		b.l.Debug(format, a...)
 	}
 }
 

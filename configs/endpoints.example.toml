@@ -1,1 +1,7 @@
 local-address = "127.0.0.1:53"
+
+[resolvers]
+chain = ["AuthorityCleaner", "al"]
+
+[resolvers.al]
+opt = "123"

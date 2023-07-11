@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/pprof"
 	"net/netip"
@@ -11,35 +12,32 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog"
 
-	endpoints2 "github.com/rokkerruslan/dnska/internal/endpoints"
-	resolve2 "github.com/rokkerruslan/dnska/internal/resolve"
+	"github.com/rokkerruslan/dnska/internal/endpoints"
+	"github.com/rokkerruslan/dnska/internal/resolve"
 )
 
 type Opts struct {
 	EndpointsFilePath string
 
-	L zerolog.Logger
+	L *slog.Logger
 }
 
 type App struct {
-	endpoints []endpoints2.Endpoint
+	endpoints []endpoints.Endpoint
 
-	l zerolog.Logger
+	l *slog.Logger
 }
 
 func New(opts Opts) (*App, error) {
-	logger := opts.L
-
-	endpointsList, err := setup(logger, opts.EndpointsFilePath)
+	endpointsList, err := setup(opts.L, opts.EndpointsFilePath)
 	if err != nil {
 		return nil, err
 	}
 
 	return &App{
 		endpoints: endpointsList,
-		l:         logger,
+		l:         opts.L,
 	}, nil
 }
 
@@ -67,7 +65,7 @@ func (a *App) Run(_ context.Context) error {
 func (a *App) Shutdown() {
 	for _, endpoint := range a.endpoints {
 		if err := endpoint.Stop(); err != nil {
-			a.l.Printf("failed to stop endpoint %s :: error=%s", endpoint.Name(), err)
+			a.l.Warn("failed to stop endpoint", "endpoint", endpoint.Name(), "error", err)
 		}
 	}
 }
@@ -86,7 +84,7 @@ func (a *App) bootstrap() error {
 	go func() {
 		err := http.ListenAndServe(":8888", mux)
 		if err != nil {
-			a.l.Printf("listen and serve error: %v", err)
+			a.l.Info("failed to stop server", "error", err)
 		}
 	}()
 
@@ -97,16 +95,27 @@ type endpointsFileConfigurationV0 struct {
 	LocalAddress string `toml:"local-address"`
 }
 
-func (efc endpointsFileConfigurationV0) InstantiateEndpoints(l zerolog.Logger) ([]endpoints2.Endpoint, error) {
-	resolver := resolve2.NewCacheResolver(
-		resolve2.NewBlacklistResolver(resolve2.BlacklistResolverOpts{
+func (efc endpointsFileConfigurationV0) InstantiateEndpoints(l *slog.Logger) ([]endpoints.Endpoint, error) {
+
+	var resolver resolve.Resolver
+
+	resolver = resolve.NewCacheResolver(
+		resolve.NewBlacklistResolver(resolve.BlacklistResolverOpts{
 			AutoReloadInterval: time.Hour,
 			BlacklistURL:       "http://github.com/black",
-			Pass: resolve2.NewChainResolver(
+			Pass: resolve.NewChainResolver(
 				l,
-				resolve2.NewStaticResolver(l),
-				resolve2.NewIterativeResolver(l)),
+				resolve.NewStaticResolver(l),
+				resolve.NewIterativeResolver(l),
+				resolve.NewAdvancedForwardUDPResolver(resolve.AdvancedForwardUDPResolverOpts{
+					UpstreamAddrPort:     endpoints.DefaultCloudflareAddrPort,
+					DumpMalformedPackets: true,
+					L:                    l,
+				}),
+			),
 		}))
+
+	resolver = resolve.NewAuthorityCleaner(resolver)
 
 	udpLocalAddr, err := netip.ParseAddrPort(efc.LocalAddress)
 	if err != nil {
@@ -114,11 +123,15 @@ func (efc endpointsFileConfigurationV0) InstantiateEndpoints(l zerolog.Logger) (
 	}
 	tcpLocalAddr := udpLocalAddr
 
-	endpoints := []endpoints2.Endpoint{endpoints2.NewUDPEndpoint(udpLocalAddr, resolver, l), endpoints2.NewTCPEndpoint(tcpLocalAddr, resolver, l)}
+	endpoints := []endpoints.Endpoint{
+		endpoints.NewUDPEndpoint(udpLocalAddr, resolver, l),
+		endpoints.NewTCPEndpoint(tcpLocalAddr, resolver, l),
+	}
+
 	return endpoints, nil
 }
 
-func setup(l zerolog.Logger, endpointsFilePath string) ([]endpoints2.Endpoint, error) {
+func setup(l *slog.Logger, endpointsFilePath string) ([]endpoints.Endpoint, error) {
 	var config endpointsFileConfigurationV0
 	if _, err := toml.DecodeFile(endpointsFilePath, &config); err != nil {
 		return nil, err

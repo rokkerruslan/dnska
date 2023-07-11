@@ -2,16 +2,16 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/rokkerruslan/dnska/internal/app"
 )
 
-func NewAppCommand(l zerolog.Logger) *cobra.Command {
+func NewAppCommand(l *slog.Logger) *cobra.Command {
 	var opts struct {
 		EndpointsFilePath string
 	}

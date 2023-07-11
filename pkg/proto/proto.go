@@ -225,7 +225,7 @@ const (
 	ClassAny     QClass = 255
 )
 
-//go:generate stringer -type=QType
+//go:generate stringer -type=QType -trimprefix=QType
 type QType uint16
 
 const (
@@ -256,6 +256,51 @@ const (
 	QTypeMAILA QType = 254
 	QTypeALL   QType = 255
 )
+
+func ParseQType(s string) QType {
+	switch s {
+	case "A":
+		return QTypeA
+	case "NS":
+		return QTypeNS
+	case "MD":
+		return QTypeMD
+	case "MF":
+		return QTypeMF
+	case "CNAME":
+		return QTypeCName
+	case "SOA":
+		return QTypeSOA
+	case "MB":
+		return QTypeMB
+	case "MG":
+		return QTypeMG
+	case "MR":
+		return QTypeMR
+	case "NULL":
+		return QTypeNULL
+	case "WKS":
+		return QTypeWKS
+	case "HINFO":
+		return QTypeHINFO
+	case "MINFO":
+		return QTypeMINFO
+	case "TXT":
+		return QTypeTXT
+	case "AAAA":
+		return QTypeAAAA
+	case "AXFR":
+		return QTypeAXFR
+	case "MAILB":
+		return QTypeMAILB
+	case "MAILA":
+		return QTypeMAILA
+	case "ALL":
+		return QTypeALL
+	default:
+		return QTypeUnknown
+	}
+}
 
 //go:generate stringer -type RCode
 type RCode uint8

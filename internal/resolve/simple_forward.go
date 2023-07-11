@@ -3,10 +3,9 @@ package resolve
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
-
-	"github.com/rs/zerolog"
 
 	"github.com/rokkerruslan/dnska/internal/limits"
 	"github.com/rokkerruslan/dnska/pkg/debug"
@@ -16,7 +15,7 @@ import (
 type SimpleForwardUDPResolverOpts struct {
 	ForwardAddr          netip.AddrPort
 	DumpMalformedPackets bool
-	L                    zerolog.Logger
+	L                    *slog.Logger
 }
 
 func NewSimpleForwardUDPResolver(opts SimpleForwardUDPResolverOpts) *SimpleForwardUDPResolver {
@@ -27,14 +26,18 @@ func NewSimpleForwardUDPResolver(opts SimpleForwardUDPResolverOpts) *SimpleForwa
 	}
 }
 
+// SimpleForwardUDPResolver allocate local port every resolve.
 type SimpleForwardUDPResolver struct {
 	addr                 netip.AddrPort
 	dumpMalformedPackets bool
 
-	l zerolog.Logger
+	l *slog.Logger
 }
 
-func (sfr *SimpleForwardUDPResolver) Resolve(ctx context.Context, in proto.Message) (proto.Message, error) {
+func (sfr *SimpleForwardUDPResolver) Resolve(
+	ctx context.Context,
+	in *proto.InternalMessage,
+) (*proto.InternalMessage, error) {
 
 	// Currently, we dial up a new UDP socket for every lookup
 	// operation. It's not efficient, but it appropriate (and simple)
@@ -43,42 +46,42 @@ func (sfr *SimpleForwardUDPResolver) Resolve(ctx context.Context, in proto.Messa
 
 	conn, err := net.DialUDP("udp", nil, net.UDPAddrFromAddrPort(sfr.addr))
 	if err != nil {
-		return proto.Message{}, fmt.Errorf("failed to dial: %v", err)
+		return nil, fmt.Errorf("failed to dial: %v", err)
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			sfr.l.Printf("failed to close udp conn: %v", err)
+			sfr.l.Error("failed to close udp conn", "error", err)
 		}
 	}()
 
-	enc := proto.NewEncoder(make([]byte, limits.UDPPayloadSizeLimit))
+	enc := proto.NewEncoder(make([]byte, limits.DefaultUDPPayloadSizeLimit))
 
-	outBuf, err := enc.Encode(in)
+	outBuf, err := enc.Encode(in.ToProtoMessage())
 	if err != nil {
-		return proto.Message{}, fmt.Errorf("failed to encode: %v", err)
+		return nil, fmt.Errorf("failed to encode: %v", err)
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetWriteDeadline(deadline); err != nil {
-			return proto.Message{}, fmt.Errorf("failed to set write deadline: %v", err)
+			return nil, fmt.Errorf("failed to set write deadline: %v", err)
 		}
 	}
 
 	if _, err := conn.Write(outBuf); err != nil {
-		return proto.Message{}, fmt.Errorf("failed to send packet: %v", err)
+		return nil, fmt.Errorf("failed to send packet: %v", err)
 	}
 
-	out := make([]byte, limits.UDPPayloadSizeLimit)
+	out := make([]byte, limits.DefaultUDPPayloadSizeLimit)
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetReadDeadline(deadline); err != nil {
-			return proto.Message{}, fmt.Errorf("failed to set read deadline: %v", err)
+			return nil, fmt.Errorf("failed to set read deadline: %v", err)
 		}
 	}
 
 	n, err := conn.Read(out)
 	if err != nil {
-		return proto.Message{}, fmt.Errorf("failed to recieve packet: %v", err)
+		return nil, fmt.Errorf("failed to recieve packet: %v", err)
 	}
 	out = out[:n]
 
@@ -91,17 +94,17 @@ func (sfr *SimpleForwardUDPResolver) Resolve(ctx context.Context, in proto.Messa
 			debug.DumpMalformedPacket(out)
 		}
 
-		return proto.Message{}, fmt.Errorf("failed to decode packet: %v", err)
+		return nil, fmt.Errorf("failed to decode packet: %v", err)
 	}
 
-	if in.Header.ID != outMsg.Header.ID {
+	if outMsg.Header.ID != 0 {
 		if sfr.dumpMalformedPackets {
 			// todo: dump and query too.
 			debug.DumpMalformedPacket(out)
 		}
 
-		return proto.Message{}, fmt.Errorf("id is not equal :: in=%d out=%d", in.Header.ID, outMsg.Header.ID)
+		return nil, fmt.Errorf("id is not equal :: in=0 out=%d", outMsg.Header.ID)
 	}
 
-	return outMsg, nil
+	return proto.FromProtoMessage(outMsg), nil
 }

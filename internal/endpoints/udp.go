@@ -2,17 +2,16 @@ package endpoints
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/netip"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/rokkerruslan/dnska/internal/resolve"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-func NewUDPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l zerolog.Logger) *UDPEndpoint {
+func NewUDPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l *slog.Logger) *UDPEndpoint {
 	return &UDPEndpoint{
 		addr:     addr,
 		resolver: resolver,
@@ -23,10 +22,9 @@ func NewUDPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l zerolog.Lo
 }
 
 type UDPEndpoint struct {
-	addr      netip.AddrPort
-	resolver  resolve.Resolver
-	resolver2 resolve.ResolverV2
-	l         zerolog.Logger
+	addr     netip.AddrPort
+	resolver resolve.Resolver
+	l        *slog.Logger
 
 	exit   chan struct{}
 	onStop func()
@@ -41,17 +39,18 @@ func (ep *UDPEndpoint) Start(onStop func()) {
 
 	conn, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(ep.addr))
 	if err != nil {
-		ep.l.Printf("failed to listen :: error=%v", err)
+		ep.l.Error("failed to listen", "error", err)
+		return
 	}
 
 	defer func() {
 		closeErr := conn.Close()
 		if closeErr != nil {
-			ep.l.Printf("failed to close connection :: error=%v", closeErr)
+			ep.l.Error("failed to close connection", closeErr)
 		}
 	}()
 
-	ep.l.Printf("starts on %v | %v", conn.LocalAddr(), ep.addr)
+	ep.l.Info("udp starts", "addr", conn.LocalAddr())
 
 	for {
 		select {
@@ -69,7 +68,7 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 	buf := make([]byte, 512)
 
 	if err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
-		ep.l.Printf("failed to set deadline :: error=%v", err)
+		ep.l.Error("failed to set deadline", "error", err)
 		return
 	}
 	_, remoteAddr, err := conn.ReadFromUDP(buf)
@@ -79,7 +78,7 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 		}
 
 		packetReadErrorsTotal.Inc()
-		ep.l.Printf("failed to read from udp :: error=%v", err)
+		ep.l.Error("failed to read from udp :: error=%v", err)
 		return
 	}
 
@@ -90,38 +89,54 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 	inMsg, err := dec.Decode(buf)
 	if err != nil {
 		packetDecodeErrorsTotal.Inc()
-		ep.l.Printf("failed to decode message :: error=%v", err)
+		ep.l.Error("failed to decode message", "error", err)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	outMsg, err := ep.resolver.Resolve(ctx, inMsg)
+	inMsg2 := proto.FromProtoMessage(inMsg)
+
+	outMsg, err := ep.resolver.Resolve(ctx, inMsg2)
 	if err != nil {
-		ep.l.Printf("failed to lookup :: error=%v", err)
+		ep.l.Error("failed to lookup :: error=%v", err)
 		return
 	}
 
 	enc := proto.NewEncoder(buf)
 
-	buf, err = enc.Encode(outMsg)
+	outMsg2 := outMsg.ToProtoMessage()
+
+	// todo: ID of message can be different and we need to copy from input
+	outMsg2.Header.ID = inMsg.Header.ID
+
+	// todo: move to different abstraction layer
+	outMsg2.Header.Response = true
+	outMsg2.Header.RecursionAvailable = true
+	outMsg2.Header.RecursionDesired = inMsg.Header.RecursionDesired
+
+	buf, err = enc.Encode(outMsg2)
 	if err != nil {
 		packetEncodeErrorsTotal.Inc()
-		ep.l.Printf("failed to encode message :: error=%v", err)
+		ep.l.Error("failed to encode message :: error=%v", err)
 		return
 	}
 
 	if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		ep.l.Printf("failed to set write deadline :: error=%v", err)
+		ep.l.Error("failed to set write deadline :: error=%v", err)
 	}
 	if _, err := conn.WriteToUDP(buf, remoteAddr); err != nil {
-		ep.l.Printf("failed to write to udp :: error=%v", err)
+		ep.l.Error("failed to write to udp", "error", err)
 		packetWriteErrorsTotal.Inc()
 		return
 	}
 
-	ep.l.Printf("trace :: total time is %v :: q=%ep", time.Since(startTs), inMsg.Question[0].Name)
+	ep.l.Info(
+		"done",
+		slog.Duration("total", time.Since(startTs)),
+		slog.String("name", inMsg2.Question.Name),
+	)
 
 	successesProcessedOpsTotal.Inc()
 }

@@ -1,14 +1,23 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	opts := slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+
+			return a
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &opts))
 
 	defaultCmd := cobra.Command{
 		Use:   "dnska",

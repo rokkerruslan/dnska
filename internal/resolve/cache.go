@@ -2,75 +2,90 @@ package resolve
 
 import (
 	"context"
-	"errors"
-	"os"
+	"math"
+	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-
-	"github.com/rokkerruslan/dnska/pkg/bucket"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-type cacheResolver struct {
-	sub    Resolver
-	bucket *bucket.Bucket
+type RecordsCache struct {
+	mu    sync.Mutex
+	cache map[proto.Question]cacheline
 }
 
-func (c *cacheResolver) Resolve(ctx context.Context, in proto.Message) (proto.Message, error) {
-	if len(in.Question) != 1 {
-		return proto.Message{}, errors.New("cache resolver currency not support multi-question requests")
+func (rc *RecordsCache) Get(q proto.Question) ([]proto.ResourceRecord, bool, bool) {
+	rc.mu.Lock()
+	line, ok := rc.cache[q]
+	rc.mu.Unlock()
+
+	if !ok {
+		return nil, false, false
 	}
 
-	q := in.Question[0]
+	return line.list, line.ttl.Before(time.Now().UTC()), true
+}
 
-	// todo: Calculate hash from q.Name and another fields
-
-	entry, expired, exists := c.bucket.Get(q.Name)
-	if exists && !expired {
-		dec := proto.NewDecoder()
-
-		decoded, err := dec.Decode(entry.Val)
-		if err != nil {
-			return proto.Message{}, err
-		}
-
-		// todo: id?
-		decoded.Header.ID = in.Header.ID
-
-		return decoded, nil
+func (rc *RecordsCache) Put(q proto.Question, list []proto.ResourceRecord) {
+	if len(list) == 0 {
+		return
 	}
 
-	out, err := c.sub.Resolve(ctx, in)
-	if err != nil {
-		return proto.Message{}, err
-	}
-
-	if out.Header.RCode == proto.RCodeNoErrorCondition {
-		enc := proto.NewEncoder(make([]byte, 512))
-
-		buf, err := enc.Encode(out)
-		if err == nil {
-
-			entry := bucket.Entry{
-				Val: buf,
-				Tag: "",
-			}
-
-			c.bucket.Set(q.Name, entry, 10*time.Second)
+	mi := uint32(math.MaxUint32)
+	for i := range list {
+		if list[i].TTL < mi {
+			mi = list[i].TTL
 		}
 	}
 
-	return out, nil
+	ttl := time.Now().UTC().Add(time.Second * time.Duration(mi))
+
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	rc.cache[q] = cacheline{ttl: ttl, list: list}
 }
 
-func NewCacheResolver(sub Resolver) Resolver {
-	return &cacheResolver{
+type cacheline struct {
+	ttl  time.Time
+	list []proto.ResourceRecord
+}
+
+type CacheResolver struct {
+	sub   Resolver
+	cache RecordsCache
+}
+
+func NewCacheResolver(sub Resolver) *CacheResolver {
+	return &CacheResolver{
 		sub: sub,
-		bucket: bucket.New(bucket.Opts{
-			Path:    "/tmp/resolve-cache",
-			Verbose: false,
-			L:       zerolog.New(os.Stdout),
-		}),
+		cache: RecordsCache{
+			mu:    sync.Mutex{},
+			cache: map[proto.Question]cacheline{},
+		},
 	}
+}
+
+func (cr *CacheResolver) Resolve(
+	ctx context.Context, in *proto.InternalMessage,
+) (
+	*proto.InternalMessage,
+	error,
+) {
+	records, expired, ok := cr.cache.Get(in.Question)
+	if !ok || expired {
+		out, err := cr.sub.Resolve(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+
+		// todo: cache authority and additional info too
+
+		cr.cache.Put(in.Question, out.Answer)
+		in.Answer = out.Answer
+	} else {
+		in.Answer = records
+	}
+
+	return in, nil
 }

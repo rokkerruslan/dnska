@@ -53,8 +53,10 @@ $ dnska decode [FILENAME]
 
 ### Todo
 
-- Caching name server.
-- Recursive resolving.
+- Partial encode/decode messages.
+- Improve perfomace.
+- Improve metrics/logs.
+- Database. Store cache on disk.
 - Loading zones and working as authoritative name server.
 
 ### RFCs
@@ -64,11 +66,6 @@ is a list of RFCs that I leant upon.
 
 - DOMAIN NAMES - CONCEPTS AND FACILITIES [RFC1035](https://datatracker.ietf.org/doc/html/rfc1034)
 - DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION [RFC1035](https://datatracker.ietf.org/doc/html/rfc1035)
-
-  Base documents about DNS design. Not all record formats are supported. Currently, only:
-  + A
-  + CNAME
-
 - DNS Extensions to Support IP Version 6 [RFC2396](https://datatracker.ietf.org/doc/html/rfc3596)
 
   Introduce the AAAA record type.
