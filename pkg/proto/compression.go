@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -101,62 +100,64 @@ type labelsIndex struct {
 	nameIndex map[string]uint
 }
 
-// EncodeName encodes domain name in buffer.
-//
-// Domain names in messages are expressed in terms of a sequence of labels.
-// Each label is represented as a one octet length field followed by that
-// number of octets. Since every domain name ends with the null label of
-// the root, a domain name is terminated by a length byte of zero.  The
-// high order two bits of every length octet must be zero, and the
-// remaining six bits of the length field limit the label to 63 octets or
-// less.
-func (li *labelsIndex) EncodeName(b *bv.ByteView, s string) error {
+// EncodeName encodes domain name in buffer using DNS compression (RFC 1035).
+func (li *labelsIndex) EncodeName(b *bv.BV, s string) error {
 	if len(s) > limits.MaxNameSize {
 		return fmt.Errorf("the name length should be %d or less, got %d", limits.MaxNameSize, len(s))
 	}
 
-	s = strings.TrimSuffix(s, ".")
+	s = strings.Trim(s, ".")
+
+	// root zone
+	if s == "" {
+		return b.PutUint8(0)
+	}
 
 	if labels, offset, exist := li.getName(s); exist {
-		if len(labels) != 0 { // todo: This is incorrect. Make generic algorithm for labels index.
-			li.putName(s, b.Pos())
-		}
+		startPos := b.Pos()
 
 		for _, label := range labels {
+			if len(label) > limits.MaxLabelSize {
+				return fmt.Errorf("label %q exceeds limit %d", label, limits.MaxLabelSize)
+			}
 			if err := b.PutUint8(uint8(len(label))); err != nil {
 				return err
 			}
-
-			for _, ch := range []byte(label) {
-				if err := b.PutUint8(ch); err != nil {
+			for i := 0; i < len(label); i++ {
+				if err := b.PutUint8(label[i]); err != nil {
 					return err
 				}
 			}
 		}
 
-		offset := uint16(offset)
+		if offset > 0x3fff {
+			return fmt.Errorf("compression offset %d exceeds 14-bit limit", offset)
+		}
 
-		if err := b.PutUint8(0xc0 | uint8(offset>>8)); err != nil {
+		ptr := uint16(offset) | 0xc000
+		if err := b.PutUint8(uint8(ptr >> 8)); err != nil {
+			return err
+		}
+		if err := b.PutUint8(uint8(ptr)); err != nil {
 			return err
 		}
 
-		if err := b.PutUint8(uint8(offset)); err != nil { // uint8(index & 0xff)
-			return err
-		}
-
+		li.putName(s, startPos)
 		return nil
 	}
 
-	var parts []Part
-	for _, label := range strings.Split(s, ".") {
+	rawLabels := strings.Split(s, ".")
+	type Part struct {
+		Label  string
+		Offset uint
+	}
+	parts := make([]Part, 0, len(rawLabels))
+
+	for _, label := range rawLabels {
 		if len(label) == 0 {
-			// todo: error because label is empty?
-			break
+			return fmt.Errorf("invalid domain name %q: empty label", s)
 		}
-
-		labelLength := uint8(len(label))
-
-		if labelLength > limits.MaxLabelSize {
+		if len(label) > limits.MaxLabelSize {
 			return fmt.Errorf("label %q too big", label)
 		}
 
@@ -165,12 +166,11 @@ func (li *labelsIndex) EncodeName(b *bv.ByteView, s string) error {
 			Offset: b.Pos(),
 		})
 
-		if err := b.PutUint8(labelLength); err != nil {
+		if err := b.PutUint8(uint8(len(label))); err != nil {
 			return err
 		}
-
-		for _, ch := range []byte(label) {
-			if err := b.PutUint8(ch); err != nil {
+		for i := 0; i < len(label); i++ {
+			if err := b.PutUint8(label[i]); err != nil {
 				return err
 			}
 		}
@@ -180,85 +180,21 @@ func (li *labelsIndex) EncodeName(b *bv.ByteView, s string) error {
 		return err
 	}
 
-	// Build index.
-
+	suffix := ""
 	for i := len(parts) - 1; i >= 0; i-- {
-		elements := parts[i:]
-
-		buf := strings.Builder{}
-		for _, el := range elements {
-			buf.WriteString(el.Label)
-			buf.WriteByte('.')
+		if suffix == "" {
+			suffix = parts[i].Label
+		} else {
+			suffix = parts[i].Label + "." + suffix
 		}
-
-		li.putName(strings.TrimSuffix(buf.String(), "."), elements[0].Offset)
+		li.putName(suffix, parts[i].Offset)
 	}
 
 	return nil
 }
 
-func (li *labelsIndex) DecodeName(b *bv.ByteView) (string, error) {
-	pos := b.Pos()
-
-	jumped := false
-	maxJumps := 5
-	jumpsPerformed := 0
-
-	delim := ""
-	out := ""
-
-	for {
-		if jumpsPerformed > maxJumps {
-			return "", errors.New("jumps limit reached")
-		}
-
-		length, err := b.Index(pos)
-		if err != nil {
-			return "", err
-		}
-
-		if length&0xc0 == 0xc0 {
-			if !jumped {
-				b.Seek(pos + 2)
-			}
-
-			b2, err := b.Index(pos + 1)
-			if err != nil {
-				return "", err
-			}
-
-			offset := (uint16(length^0xc0) << 8) | uint16(b2)
-			pos = uint(offset)
-
-			jumped = true
-			jumpsPerformed++
-
-			continue
-		} else {
-			pos++
-
-			if length == 0 {
-				break
-			}
-
-			out += delim
-			part, err := b.TakeRange(pos, uint(length))
-			if err != nil {
-				return "", err
-			}
-
-			out += string(part)
-
-			delim = "."
-			pos += uint(length)
-		}
-	}
-
-	if !jumped {
-		b.Seek(pos)
-	}
-
-	return out, nil
+func (li *labelsIndex) DecodeName(b *bv.BV) (string, error) {
+	return "", nil
 }
 
 func (li *labelsIndex) getName(name string) ([]string, uint, bool) {

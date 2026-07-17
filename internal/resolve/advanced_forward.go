@@ -17,16 +17,15 @@ import (
 )
 
 type AdvancedForwardUDPResolverOpts struct {
-	UpstreamAddrPort     netip.AddrPort
-	DumpMalformedPackets bool
-	L                    *slog.Logger
+	UpstreamAddrPort      netip.AddrPort
+	MalformedPacketDumper debug.MalformedPacketDumper
+	L                     *slog.Logger
 
-	Sub Resolver
+	Sub HResolver
 }
 
 type AdvancedForwardUDPResolver struct {
-	dumpMalformedPackets bool
-	upstreaminfo         upstreaminfo
+	upstreaminfo upstreaminfo
 
 	conn *net.UDPConn
 
@@ -35,6 +34,8 @@ type AdvancedForwardUDPResolver struct {
 	mu             sync.Mutex
 	channels       map[uint16]chan ans
 	indexAllocator IndexAllocator
+
+	mpd debug.MalformedPacketDumper
 
 	l *slog.Logger
 }
@@ -59,12 +60,12 @@ func NewAdvancedForwardUDPResolver(
 			addrPort:       opts.UpstreamAddrPort,
 			payloadBufSize: limits.DefaultUDPPayloadSizeLimit,
 		},
-		conn:                 conn,
-		in:                   make(chan req),
-		channels:             map[uint16]chan ans{},
-		indexAllocator:       IndexAllocator{cur: 0, max: 4},
-		dumpMalformedPackets: opts.DumpMalformedPackets,
-		l:                    opts.L,
+		conn:           conn,
+		in:             make(chan req),
+		channels:       map[uint16]chan ans{},
+		indexAllocator: IndexAllocator{cur: 0, max: 4},
+		mpd:            opts.MalformedPacketDumper,
+		l:              opts.L,
 	}
 
 	go r.sender()
@@ -147,7 +148,7 @@ func (afr *AdvancedForwardUDPResolver) receiver() {
 	for {
 		n, err := afr.conn.Read(out)
 		if err != nil {
-			afr.l.Error("failed to read: %v", err)
+			afr.l.Error("failed to read: %v", "err", err)
 			break
 		}
 
@@ -156,9 +157,7 @@ func (afr *AdvancedForwardUDPResolver) receiver() {
 		outMsg, err := dec.Decode(out[:n])
 		if err != nil {
 			afr.l.Error("failed to decode package", "error", err)
-			if afr.dumpMalformedPackets {
-				debug.DumpMalformedPacket(out)
-			}
+			afr.mpd.Dump(out[:n])
 
 			continue
 		}
@@ -194,7 +193,7 @@ func (afr *AdvancedForwardUDPResolver) Close() {
 
 	defer func() {
 		if err := afr.conn.Close(); err != nil {
-			afr.l.Error("failed to close udp conn: %v", err)
+			afr.l.Error("failed to close udp conn: %v", "err", err)
 		}
 	}()
 }

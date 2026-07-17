@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/spf13/cobra"
 
 	"github.com/rokkerruslan/dnska/internal/resolvers/stub"
+	"github.com/rokkerruslan/dnska/internal/udp"
+	"github.com/rokkerruslan/dnska/pkg/debug"
+	"github.com/rokkerruslan/dnska/pkg/format"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 	"github.com/rokkerruslan/dnska/pkg/query"
 )
@@ -45,14 +48,23 @@ func NewLookupCommand(l *slog.Logger) *cobra.Command {
 
 			in := query.AddQuestion(query.NewTemplate(), name, proto.ParseQType(opts.Type), proto.QClass(opts.Class))
 
-			resolver := stub.NewSimpleForwardUDPResolver(stub.SimpleForwardUDPResolverOpts{
-				ForwardAddr:          addr,
-				DumpMalformedPackets: opts.DumpMalformedPackets,
-				L:                    l,
-				SetRecursionDesired:  opts.SetRecursionDesiredFlag,
+			udpConn, err := udp.NewConn(net.UDPAddrFromAddrPort(addr))
+			if err != nil {
+				return err
+			}
+
+			mpd := debug.NewFileMalformedPacketDumper(debug.FileMalformedPacketDumperOpts{
+				DumpDir: "./dumps",
+				L:       l,
 			})
 
-			in2 := proto.FromProtoMessage(in)
+			resolver := stub.NewSimpleForwardUDPResolver(stub.SimpleForwardUDPResolverOpts{
+				UdpConn:               udpConn,
+				MalformedPacketDumper: mpd,
+				SetRecursionDesired:   opts.SetRecursionDesiredFlag,
+			})
+
+			in2 := proto.FromProtoMessage(&in)
 
 			message2, err := resolver.Resolve(ctx, in2)
 			if err != nil {
@@ -61,14 +73,10 @@ func NewLookupCommand(l *slog.Logger) *cobra.Command {
 
 			message := message2.ToProtoMessage()
 
-			if err != nil {
-				return fmt.Errorf("failed to lookup :: name=%s error=%v", name, err)
-			}
-
 			if opts.OnlyAnswer {
-				spew.Dump(message.Answer)
+				fmt.Print(format.FormatDNSAnswer(message.Answer))
 			} else {
-				spew.Dump(message)
+				fmt.Print(format.FormatDNSMessage(message, name))
 			}
 
 			return nil

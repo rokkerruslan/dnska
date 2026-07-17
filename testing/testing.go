@@ -6,7 +6,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func Assert(t *testing.T, got, want interface{}) {
+// Check compares the got and want values and reports an error if they are not equal.
+func Check(t *testing.T, got, want any) {
 	t.Helper()
 
 	if diff := cmp.Diff(want, got); diff != "" {

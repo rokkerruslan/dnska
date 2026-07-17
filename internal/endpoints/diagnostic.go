@@ -30,4 +30,9 @@ var (
 		Name: "dnska_server_packet_encode_error_total",
 		Help: "The total number of packet encode errors",
 	})
+
+	packetProcessErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dnska_server_packet_process_error_total",
+		Help: "The total number of packet process errors",
+	})
 )

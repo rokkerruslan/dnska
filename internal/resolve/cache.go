@@ -6,7 +6,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rokkerruslan/dnska/pkg/proto"
+)
+
+var (
+	dnskaCacheResolverRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dnska_cache_resolver_requests_total",
+		Help: "The total number of requests sent to the cache resolver",
+	})
+
+	dnskaCacheResolverHitsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dnska_cache_resolver_hits_total",
+		Help: "The total number of requests that hits",
+	})
+
+	dnskaCacheResolverMissTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dnska_cache_resolver_miss_total",
+		Help: "The total number of requests that miss",
+	})
 )
 
 type RecordsCache struct {
@@ -52,11 +71,11 @@ type cacheline struct {
 }
 
 type CacheResolver struct {
-	sub   Resolver
+	sub   HResolver
 	cache RecordsCache
 }
 
-func NewCacheResolver(sub Resolver) *CacheResolver {
+func NewCacheResolver(sub HResolver) *CacheResolver {
 	return &CacheResolver{
 		sub: sub,
 		cache: RecordsCache{
@@ -72,8 +91,12 @@ func (cr *CacheResolver) Resolve(
 	*proto.InternalMessage,
 	error,
 ) {
+	dnskaCacheResolverRequestsTotal.Inc()
+
 	records, expired, ok := cr.cache.Get(in.Question)
 	if !ok || expired {
+		dnskaCacheResolverMissTotal.Inc()
+
 		out, err := cr.sub.Resolve(ctx, in)
 		if err != nil {
 			return nil, err
@@ -84,6 +107,7 @@ func (cr *CacheResolver) Resolve(
 		cr.cache.Put(in.Question, out.Answer)
 		in.Answer = out.Answer
 	} else {
+		dnskaCacheResolverHitsTotal.Inc()
 		in.Answer = records
 	}
 

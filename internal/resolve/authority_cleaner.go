@@ -9,10 +9,10 @@ import (
 // AuthorityCleaner remove the Authority section from proto.Message and set
 // the NSCount field to 0 if any answer is present.
 type AuthorityCleaner struct {
-	sub Resolver
+	sub HResolver
 }
 
-func NewAuthorityCleaner(sub Resolver) *AuthorityCleaner {
+func NewAuthorityCleaner(sub HResolver) *AuthorityCleaner {
 	return &AuthorityCleaner{
 		sub: sub,
 	}

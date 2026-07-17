@@ -1,5 +1,7 @@
 package proto
 
+import "fmt"
+
 // Internal representation of proto.Message
 
 type InternalMessage struct {
@@ -13,7 +15,7 @@ func NewInternalMessage() *InternalMessage {
 	return &InternalMessage{}
 }
 
-func FromProtoMessage(m Message) *InternalMessage {
+func FromProtoMessage(m *Message) *InternalMessage {
 	return &InternalMessage{
 		Question:   m.Question[0],
 		Answer:     m.Answer,
@@ -22,9 +24,25 @@ func FromProtoMessage(m Message) *InternalMessage {
 	}
 }
 
-func (im *InternalMessage) ToProtoMessage() Message {
-	return Message{
+func FromProtoMessageToInternalMessage(m *Message) (*InternalMessage, error) {
+	if len(m.Question) == 0 {
+		return nil, fmt.Errorf("message has no question")
+	}
+
+	return &InternalMessage{
+		Question:   m.Question[0],
+		Answer:     m.Answer,
+		Authority:  m.Authority,
+		Additional: m.Additional,
+	}, nil
+}
+
+func (im *InternalMessage) ToProtoMessage() *Message {
+	return &Message{
 		Header: Header{
+			ID:      0,
+			Opcode:  OpcodeQuery,
+			Z:       0,
 			QDCount: 1,
 			ANCount: uint16(len(im.Answer)),
 			NSCount: uint16(len(im.Authority)),

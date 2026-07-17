@@ -69,3 +69,11 @@ is a list of RFCs that I leant upon.
 - DNS Extensions to Support IP Version 6 [RFC2396](https://datatracker.ietf.org/doc/html/rfc3596)
 
   Introduce the AAAA record type.
+
+### Testing
+
+```
+./app run --endpoints-file-path ./configs/endpoints.local.toml
+
+dig @127.0.0.1 -p 5354 ya.ru
+```

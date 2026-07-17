@@ -39,7 +39,7 @@ func TestParseQType(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
-			testing2.Assert(t, ParseQType(c.in), c.out)
+			testing2.Check(t, ParseQType(c.in), c.out)
 		})
 	}
 }
@@ -60,7 +60,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 				Response:            false,
 				Opcode:              0,
 				AuthoritativeAnswer: false,
-				TruncateCation:      false,
+				Truncated:           false,
 				RecursionDesired:    true,
 				RecursionAvailable:  false,
 				Z:                   0,
@@ -82,7 +82,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 			Additional: []ResourceRecord{},
 		}
 
-		testing2.Assert(t, got, want)
+		testing2.Check(t, got, want)
 		//testing2.Assert(t, uint(len(buf)), nb.Pos())
 
 		enc := NewEncoder(make([]byte, 512))
@@ -90,7 +90,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 
 		testing2.ThisIsFine(t, err)
 
-		testing2.Assert(t, outBuf, buf)
+		testing2.Check(t, outBuf, buf)
 	})
 
 	t.Run("standard-query.response.A.google.com", func(t *testing.T) {
@@ -107,7 +107,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 				Response:            true,
 				Opcode:              0,
 				AuthoritativeAnswer: false,
-				TruncateCation:      false,
+				Truncated:           false,
 				RecursionDesired:    true,
 				RecursionAvailable:  true,
 				Z:                   0,
@@ -178,14 +178,14 @@ func TestDecodeEncodeMessage(t *testing.T) {
 			Additional: []ResourceRecord{},
 		}
 
-		testing2.Assert(t, got, want)
+		testing2.Check(t, got, want)
 
 		enc := NewEncoder(make([]byte, 512))
 		outBuf, err := enc.Encode(got)
 
 		testing2.ThisIsFine(t, err)
 
-		testing2.Assert(t, outBuf, buf)
+		testing2.Check(t, outBuf, buf)
 	})
 
 	t.Run("standard-query.query.A.yahoo.com.opt.cookie", func(t *testing.T) {
@@ -204,7 +204,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 				Response:            false,
 				Opcode:              OpcodeQuery,
 				AuthoritativeAnswer: false,
-				TruncateCation:      false,
+				Truncated:           false,
 				RecursionDesired:    true,
 				RecursionAvailable:  false,
 				RCode:               RCodeNoErrorCondition,
@@ -227,7 +227,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 			},
 		}
 
-		testing2.Assert(t, got, want)
+		testing2.Check(t, got, want)
 	})
 
 	t.Run("standard-query.response.A.yahoo.com.opt.cookie", func(t *testing.T) {
@@ -246,7 +246,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 				Response:            true,
 				Opcode:              OpcodeQuery,
 				AuthoritativeAnswer: false,
-				TruncateCation:      false,
+				Truncated:           false,
 				RecursionDesired:    true,
 				RecursionAvailable:  true,
 				Z:                   0,
@@ -279,7 +279,16 @@ func TestDecodeEncodeMessage(t *testing.T) {
 			},
 		}
 
-		testing2.Assert(t, got, want)
+		testing2.Check(t, got, want)
+	})
+
+	t.Run("debug", func(t *testing.T) {
+		buf, err := os.ReadFile("testdata/20260720-013244-739c667a-faf7-409b-b2fd-12826726c23a.dns")
+		testing2.FailIfError(t, err)
+
+		dec := NewDecoder()
+		_, err = dec.Decode(buf)
+		testing2.FailIfError(t, err)
 	})
 
 	t.Run("standard-query.response.soa.com", func(t *testing.T) {
@@ -296,7 +305,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 				Response:            true,
 				Opcode:              OpcodeQuery,
 				AuthoritativeAnswer: false,
-				TruncateCation:      false,
+				Truncated:           false,
 				RecursionDesired:    false,
 				RecursionAvailable:  false,
 				Z:                   0,
@@ -544,7 +553,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 			},
 		}
 
-		testing2.Assert(t, got, want)
+		testing2.Check(t, got, want)
 
 		enc := NewEncoder(make([]byte, 512))
 		outBuf, err := enc.Encode(got)
@@ -555,7 +564,7 @@ func TestDecodeEncodeMessage(t *testing.T) {
 		decoded, err := dec2.Decode(outBuf)
 
 		testing2.ThisIsFine(t, err)
-		testing2.Assert(t, decoded, want)
+		testing2.Check(t, decoded, want)
 	})
 
 	t.Run("error", func(t *testing.T) {

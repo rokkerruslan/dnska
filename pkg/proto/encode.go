@@ -10,20 +10,20 @@ import (
 )
 
 type Encoder struct {
-	bv     *bv.ByteView
+	bv     *bv.BV
 	index  *labelsIndex // deprecated
 	index2 map[string]uint16
 }
 
 func NewEncoder(to []byte) *Encoder {
 	return &Encoder{
-		bv:    bv.NewByteView(to),
+		bv:    bv.New(to),
 		index: &labelsIndex{nameIndex: map[string]uint{}},
 	}
 }
 
 // Encode encodes message "m".
-func (enc *Encoder) Encode(m Message) ([]byte, error) {
+func (enc *Encoder) Encode(m *Message) ([]byte, error) {
 	if err := encodeHeader(enc.bv, m.Header); err != nil {
 		return enc.bv.Bytes(), err
 	}
@@ -55,7 +55,7 @@ func (enc *Encoder) Encode(m Message) ([]byte, error) {
 	return enc.bv.Bytes(), nil
 }
 
-func encodeHeader(buf *bv.ByteView, h Header) error {
+func encodeHeader(buf *bv.BV, h Header) error {
 	if err := buf.PutUint16(h.ID); err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func encodeHeader(buf *bv.ByteView, h Header) error {
 	if h.AuthoritativeAnswer {
 		flags |= 0x400
 	}
-	if h.TruncateCation {
+	if h.Truncated {
 		flags |= 0x200
 	}
 	if h.RecursionDesired {
@@ -106,7 +106,7 @@ func encodeHeader(buf *bv.ByteView, h Header) error {
 	return nil
 }
 
-func encodeQuestion(b *bv.ByteView, index *labelsIndex, q Question) error {
+func encodeQuestion(b *bv.BV, index *labelsIndex, q Question) error {
 	if err := index.EncodeName(b, q.Name); err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func encodeQuestion(b *bv.ByteView, index *labelsIndex, q Question) error {
 	return nil
 }
 
-func encodeRecord(b *bv.ByteView, index *labelsIndex, r ResourceRecord) error {
+func encodeRecord(b *bv.BV, index *labelsIndex, r ResourceRecord) error {
 	if err := index.EncodeName(b, r.Name); err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func encodeRecord(b *bv.ByteView, index *labelsIndex, r ResourceRecord) error {
 	return nil
 }
 
-func encodeResourceData(nb *bv.ByteView, index *labelsIndex, r ResourceRecord) error {
+func encodeResourceData(nb *bv.BV, index *labelsIndex, r ResourceRecord) error {
 	switch r.Type {
 	case QTypeA:
 		for _, part := range strings.Split(r.RData, ".") {
@@ -266,7 +266,7 @@ func encodeResourceData(nb *bv.ByteView, index *labelsIndex, r ResourceRecord) e
 	return nil
 }
 
-func encodeCharacterString(nb *bv.ByteView, s string) error {
+func encodeCharacterString(nb *bv.BV, s string) error {
 	if len(s) > limits.MaxNameSize {
 		return fmt.Errorf("the length should be %d or less, got %d", limits.MaxNameSize, len(s))
 	}

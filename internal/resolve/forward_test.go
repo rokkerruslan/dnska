@@ -10,6 +10,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/rokkerruslan/dnska/internal/resolve"
+	"github.com/rokkerruslan/dnska/pkg/debug"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 
 	tst "github.com/rokkerruslan/dnska/testing"
@@ -23,9 +24,10 @@ func TestAdvancedForwardUDPResolver(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	r := resolve.NewAdvancedForwardUDPResolver(resolve.AdvancedForwardUDPResolverOpts{
-		UpstreamAddrPort:     addrPort,
-		DumpMalformedPackets: false,
-		L:                    logger,
+		UpstreamAddrPort:      addrPort,
+		MalformedPacketDumper: debug.NewFakeMalformedPacketDumper(),
+		L:                     logger,
+		Sub:                   nil,
 	})
 
 	inM := proto.Message{
@@ -43,7 +45,7 @@ func TestAdvancedForwardUDPResolver(t *testing.T) {
 		},
 	}
 
-	in := proto.FromProtoMessage(inM)
+	in := proto.FromProtoMessage(&inM)
 
 	go func() {
 		out, err := r.Resolve(context.Background(), in)
@@ -128,47 +130,47 @@ func TestIndexAllocator(t *testing.T) {
 	var v uint16
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(0), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(0), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(1), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(1), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(2), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(2), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, false)
-	tst.Assert(t, uint16(0), v)
+	tst.Check(t, ok, false)
+	tst.Check(t, uint16(0), v)
 
 	ia.Free(uint16(2))
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(2), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(2), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, false)
-	tst.Assert(t, uint16(0), v)
+	tst.Check(t, ok, false)
+	tst.Check(t, uint16(0), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, false)
-	tst.Assert(t, uint16(0), v)
+	tst.Check(t, ok, false)
+	tst.Check(t, uint16(0), v)
 
 	ia.Free(uint16(2), uint16(0), uint16(1))
-	tst.Assert(t, ia.FreeLen(), 3)
+	tst.Check(t, ia.FreeLen(), 3)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(1), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(1), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(0), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(0), v)
 
 	v, ok = ia.Reserve()
-	tst.Assert(t, ok, true)
-	tst.Assert(t, uint16(2), v)
+	tst.Check(t, ok, true)
+	tst.Check(t, uint16(2), v)
 }

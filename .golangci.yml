@@ -1,0 +1,16 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustruct
+  settings:
+    exhaustruct:
+      # Require every field to be set explicitly when constructing these types.
+      # Scoped to the option structs (`*Opts`) used by constructors, so a
+      # forgotten field is caught at the call site instead of silently
+      # becoming a zero value. Matched against the fully-qualified type name.
+      # Scoped to this module so third-party option structs with many optional
+      # fields (e.g. prometheus.CounterOpts) are not forced to be exhaustive.
+      include:
+        - 'github\.com/rokkerruslan/dnska/.*Opts$'

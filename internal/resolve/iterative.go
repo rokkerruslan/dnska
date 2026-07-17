@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/netip"
 	"sync"
 
 	"github.com/rokkerruslan/dnska/internal/namedroot"
 	"github.com/rokkerruslan/dnska/internal/resolvers/stub"
+	"github.com/rokkerruslan/dnska/internal/udp"
+	"github.com/rokkerruslan/dnska/pkg/debug"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
@@ -97,10 +100,18 @@ func (fr *IterativeResolver) cycle(ctx context.Context, opts cycleOpts) (*proto.
 		// Instantiave CacheResolver/AdvancedForwardUDPResolver for addrPort
 		// and store it for perfomance improving.
 
+		udpConn, err := udp.NewConn(net.UDPAddrFromAddrPort(addrPort))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create UDP connection: %v", err)
+		}
+
 		res := stub.NewSimpleForwardUDPResolver(stub.SimpleForwardUDPResolverOpts{
-			ForwardAddr:          addrPort,
-			DumpMalformedPackets: opts.DumpUnknownPacket,
-			L:                    opts.L,
+			UdpConn:             udpConn,
+			SetRecursionDesired: false,
+			MalformedPacketDumper: debug.NewFileMalformedPacketDumper(debug.FileMalformedPacketDumperOpts{
+				DumpDir: "./dumps",
+				L:       opts.L,
+			}),
 		})
 
 		in := proto.InternalMessage{

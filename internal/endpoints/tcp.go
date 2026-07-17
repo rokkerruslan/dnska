@@ -13,7 +13,7 @@ import (
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l *slog.Logger) *TCPEndpoint {
+func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.HResolver, l *slog.Logger) *TCPEndpoint {
 	return &TCPEndpoint{
 		addr:     addr,
 		resolver: resolver,
@@ -25,7 +25,7 @@ func NewTCPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l *slog.Logg
 
 type TCPEndpoint struct {
 	addr     netip.AddrPort
-	resolver resolve.Resolver
+	resolver resolve.HResolver
 	l        *slog.Logger
 
 	exit   chan struct{}
@@ -131,7 +131,7 @@ func (t *TCPEndpoint) step(conn *net.TCPConn) {
 
 	enc := proto.NewEncoder(make([]byte, 512))
 
-	dataBuf, err := enc.Encode(outMsg.ToProtoMessage())
+	dataBuf, err := enc.Encode(outMsg2)
 	if err != nil {
 		packetEncodeErrorsTotal.Inc()
 		t.l.Error("tcp :: failed to encode message :: error=%v", err)

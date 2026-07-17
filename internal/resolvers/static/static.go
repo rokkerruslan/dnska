@@ -1,18 +1,19 @@
-package resolve
+package static
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-type answer struct {
-	records []proto.ResourceRecord
+type Opts struct {
+	L *slog.Logger
 }
 
-func NewStaticResolver(_ *slog.Logger) *StaticResolver {
+func NewStaticResolver(opts Opts) *StaticResolver {
 	return &StaticResolver{
 		map[proto.Question]answer{
 			{
@@ -40,7 +41,7 @@ func (s *StaticResolver) Resolve(_ context.Context, in *proto.InternalMessage) (
 
 	ans, ok := s.m[question]
 	if !ok {
-		return nil, errNoReport
+		return nil, errors.New("no answer for question")
 	}
 
 	out := proto.InternalMessage{
@@ -49,4 +50,8 @@ func (s *StaticResolver) Resolve(_ context.Context, in *proto.InternalMessage) (
 	}
 
 	return &out, nil
+}
+
+type answer struct {
+	records []proto.ResourceRecord
 }

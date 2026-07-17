@@ -1,166 +1,153 @@
 package bv
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
-// ByteView ...
+// BV mutable view of a byte slice. It allows reading and writing
+// bytes in a sequential manner, maintaining a position pointer to track
+// the current read/write location.
 //
 // Use big-endian (BE) bytes order of digital data.
-type ByteView struct {
-	data []byte
-	pos  uint
+type BV struct {
+	b []byte
+	p uint
 }
 
-func NewByteView(data []byte) *ByteView {
-	return &ByteView{
-		data: data,
-		pos:  0,
+// New creates a new BV from an existing byte slice. Input slice
+// is not copied, so any changes to the original slice will be reflected
+// in the BV.
+func New(b []byte) *BV {
+	return &BV{
+		b: b,
+		p: 0,
 	}
 }
 
-func (nb *ByteView) Pos() uint {
-	return nb.pos
+// Pos returns the current position of the BV pointer.
+func (bv *BV) Pos() uint {
+	return bv.p
 }
 
-func (nb *ByteView) Advance(v uint) {
-	nb.pos += v
+// Advance moves the BV pointer forward by the specified number of bytes.
+func (bv *BV) Advance(n uint) bool {
+	if n > uint(len(bv.b)) || bv.p > uint(len(bv.b))-n {
+		return false
+	}
+	bv.p += n
+	return true
 }
 
-func (nb *ByteView) Seek(pos uint) {
-	nb.pos = pos
+// Seek sets the BV pointer to the specified position.
+func (bv *BV) Seek(p uint) bool {
+	if p > uint(len(bv.b)) {
+		return false
+	}
+	bv.p = p
+	return true
 }
 
-func (nb *ByteView) Take() (byte, error) {
-	return nb.take()
+// Bytes returns the underlying byte slice of the BV up to the current position.
+func (bv *BV) Bytes() []byte {
+	return bv.b[:bv.p]
 }
 
-func (nb *ByteView) Index(pos uint) (byte, error) {
-	if pos >= uint(len(nb.data)) {
-		return 0, &ErrBuf{op: "get", pos: nb.pos}
-	}
-
-	return nb.data[pos], nil
+// UnreadBytes returns the remaining slice of bytes from current position.
+func (bv *BV) UnreadBytes() []byte {
+	return bv.b[bv.p:]
 }
 
-func (nb *ByteView) TakeRange(start, length uint) ([]byte, error) {
-	if start+length > uint(len(nb.data)) {
-		return nil, &ErrBuf{op: "range", pos: start + length}
-	}
-
-	return nb.data[start : start+length], nil
+// Len returns the length of the underlying byte slice of the BV.
+func (bv *BV) Len() int {
+	return len(bv.b)
 }
 
-func (nb *ByteView) TakeUint16() (uint16, error) {
-	a, err := nb.take()
-	if err != nil {
-		return 0, err
-	}
-	b, err := nb.take()
-	if err != nil {
-		return 0, err
+// Index returns the byte at the specified position without changing the BV pointer.
+func (bv *BV) Index(p uint) (byte, error) {
+	if p >= uint(len(bv.b)) {
+		return 0, &ErrBuf{Op: "index", Pos: p}
 	}
 
-	return uint16(a)<<8 | uint16(b), nil
+	return bv.b[p], nil
 }
 
-func (nb *ByteView) TakeUint32() (uint32, error) {
-	a, err := nb.take()
-	if err != nil {
-		return 0, err
-	}
-	b, err := nb.take()
-	if err != nil {
-		return 0, err
-	}
-	c, err := nb.take()
-	if err != nil {
-		return 0, err
-	}
-	d, err := nb.take()
-	if err != nil {
-		return 0, err
+// Range returns a slice of bytes from the specified start position with the given
+// length. Without changing the BV pointer.
+func (bv *BV) Range(start, length uint) ([]byte, error) {
+	if start > uint(len(bv.b)) || length > uint(len(bv.b))-start {
+		return nil, &ErrBuf{Op: "range", Pos: start}
 	}
 
-	return uint32(a)<<24 | uint32(b)<<16 | uint32(c)<<8 | uint32(d), nil
+	return bv.b[start : start+length], nil
 }
 
-func (nb *ByteView) take() (uint8, error) {
-	if nb.pos >= uint(len(nb.data)) {
-		return 0, &ErrBuf{op: "take", pos: nb.pos}
+func readN[T uint8 | uint16 | uint32 | uint64](bv *BV, n uint, decode func([]byte) T) (T, error) {
+	if bv.p+n > uint(len(bv.b)) {
+		return 0, &ErrBuf{Op: "read", Pos: bv.p}
 	}
-
-	b := nb.data[nb.pos]
-
-	nb.pos++
-
-	return b, nil
+	bv.p += n
+	return decode(bv.b[bv.p-n : bv.p]), nil
 }
 
-func (nb *ByteView) put(v uint8) error {
-	if nb.pos >= uint(len(nb.data)) {
-		return &ErrBuf{
-			op:  "put",
-			pos: nb.pos,
-		}
+// Uint8 returns the uint8 representation of the next byte
+// from the BV and advances the pointer by one. Returns an
+// error if there are not enough bytes left in the BV.
+func (bv *BV) Uint8() (uint8, error) { return readN(bv, 1, func(b []byte) uint8 { return b[0] }) }
+
+// Uint16 returns the uint16 representation of the next two
+// bytes from the BV and advances the pointer by two. Returns
+// an error if there are not enough bytes left in the BV.
+func (bv *BV) Uint16() (uint16, error) { return readN(bv, 2, binary.BigEndian.Uint16) }
+
+// Uint32 returns the uint32 representation of the next four
+// bytes from the BV and advances the pointer by four. Returns
+// an error if there are not enough bytes left in the BV.
+func (bv *BV) Uint32() (uint32, error) { return readN(bv, 4, binary.BigEndian.Uint32) }
+
+// Uint64 returns the uint64 representation of the next eight
+// bytes from the BV and advances the pointer by eight. Returns
+// an error if there are not enough bytes left in the BV.
+func (bv *BV) Uint64() (uint64, error) { return readN(bv, 8, binary.BigEndian.Uint64) }
+
+func putN[T uint8 | uint16 | uint32 | uint64](bv *BV, n uint, encode func(dst []byte, v T), v T) error {
+	if bv.p+n > uint(len(bv.b)) {
+		return &ErrBuf{Op: "put", Pos: bv.p}
 	}
-
-	nb.data[nb.pos] = v
-	nb.pos++
-
+	bv.p += n
+	encode(bv.b[bv.p-n:bv.p], v)
 	return nil
 }
 
-func (nb *ByteView) PutUint8(b uint8) error {
-	if err := nb.put(b); err != nil {
-		return err
-	}
-
-	return nil
+// PutUint8 writes a single byte to the BV at the current
+// position and advances the pointer by one.
+func (bv *BV) PutUint8(v uint8) error {
+	return putN(bv, 1, func(dst []byte, v uint8) { dst[0] = v }, v)
 }
 
-func (nb *ByteView) PutUint16(b uint16) error {
-	if err := nb.put(uint8(b >> 8)); err != nil {
-		return err
-	}
-
-	if err := nb.put(uint8(b & 0xff)); err != nil {
-		return err
-	}
-
-	return nil
+// PutUint16 writes a uint16 to the BV in big-endian order
+// at the current position and advances the pointer by two.
+func (bv *BV) PutUint16(v uint16) error {
+	return putN(bv, 2, func(dst []byte, v uint16) { binary.BigEndian.PutUint16(dst, v) }, v)
 }
 
-func (nb *ByteView) PutUint32(b uint32) error {
-	if err := nb.put(uint8(b >> 24 & 0xff)); err != nil {
-		return err
-	}
-	if err := nb.put(uint8(b >> 16 & 0xff)); err != nil {
-		return err
-	}
-	if err := nb.put(uint8(b >> 8 & 0xff)); err != nil {
-		return err
-	}
-	if err := nb.put(uint8(b & 0xff)); err != nil {
-		return err
-	}
-
-	return nil
+// PutUint32 writes a uint32 to the BV in big-endian order
+// at the current position and advances the pointer by four.
+func (bv *BV) PutUint32(v uint32) error {
+	return putN(bv, 4, func(dst []byte, v uint32) { binary.BigEndian.PutUint32(dst, v) }, v)
 }
 
-func (nb *ByteView) Bytes() []byte {
-	return nb.data[:nb.pos]
-}
-
-func (nb *ByteView) Len() int {
-	return len(nb.data)
+// PutUint64 writes a uint64 to the BV in big-endian order
+// at the current position and advances the pointer by eight.
+func (bv *BV) PutUint64(v uint64) error {
+	return putN(bv, 8, func(dst []byte, v uint64) { binary.BigEndian.PutUint64(dst, v) }, v)
 }
 
 type ErrBuf struct {
-	op  string
-	pos uint
+	Op  string
+	Pos uint
 }
 
 func (e *ErrBuf) Error() string {
-	return fmt.Sprintf("buf error, op=%s pos=%d", e.op, e.pos)
+	return fmt.Sprintf("buf error, op=%s pos=%d", e.Op, e.Pos)
 }

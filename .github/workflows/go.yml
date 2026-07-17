@@ -2,7 +2,7 @@ name: Go
 
 on:
   push:
-    branches: [ "default", "advanced-udp-resolver" ]
+    branches: [ "default" ]
   pull_request:
     branches: [ "default" ]
 
@@ -16,7 +16,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.20'
+        go-version: '1.27'
 
     - name: Test
       run: go test -v ./...

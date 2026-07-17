@@ -7,24 +7,40 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/rokkerruslan/dnska/internal/limits"
 	"github.com/rokkerruslan/dnska/internal/resolve"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-func NewUDPEndpoint(addr netip.AddrPort, resolver resolve.Resolver, l *slog.Logger) *UDPEndpoint {
-	return &UDPEndpoint{
-		addr:     addr,
-		resolver: resolver,
-		l:        l,
+type UDPEndpointOpts struct {
+	WriteErrorReponseToClientIfErrorOccurred bool
+	Addr                                     netip.AddrPort
+	Resolver                                 resolve.HResolver
+	WriteTimeout                             time.Duration
+	ReadTimeout                              time.Duration
+	L                                        *slog.Logger
+}
 
-		exit: make(chan struct{}),
+func NewUDPEndpoint(opts UDPEndpointOpts) *UDPEndpoint {
+	return &UDPEndpoint{
+		addr:         opts.Addr,
+		resolver:     opts.Resolver,
+		l:            opts.L,
+		writeTimeout: opts.WriteTimeout,
+		readTimeout:  opts.ReadTimeout,
+		exit:         make(chan struct{}),
 	}
 }
 
 type UDPEndpoint struct {
 	addr     netip.AddrPort
-	resolver resolve.Resolver
+	resolver resolve.HResolver
 	l        *slog.Logger
+
+	writeTimeout time.Duration
+	readTimeout  time.Duration
+
+	writeErrorReponseToClientIfErrorOccurred bool
 
 	exit   chan struct{}
 	onStop func()
@@ -46,7 +62,7 @@ func (ep *UDPEndpoint) Start(onStop func()) {
 	defer func() {
 		closeErr := conn.Close()
 		if closeErr != nil {
-			ep.l.Error("failed to close connection", closeErr)
+			ep.l.Error("failed to close connection", "error", closeErr)
 		}
 	}()
 
@@ -65,10 +81,11 @@ func (ep *UDPEndpoint) Start(onStop func()) {
 }
 
 func (ep *UDPEndpoint) step(conn *net.UDPConn) {
-	buf := make([]byte, 512)
+	buf := make([]byte, limits.DefaultUDPPayloadSizeLimit)
 
-	if err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
-		ep.l.Error("failed to set deadline", "error", err)
+	deadline := time.Now().Add(ep.readTimeout)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		ep.l.Error("failed to set read deadline", "error", err)
 		return
 	}
 	_, remoteAddr, err := conn.ReadFromUDP(buf)
@@ -78,7 +95,7 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 		}
 
 		packetReadErrorsTotal.Inc()
-		ep.l.Error("failed to read from udp :: error=%v", err)
+		ep.l.Error("failed to read from udp", "error", err)
 		return
 	}
 
@@ -96,11 +113,21 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	inMsg2 := proto.FromProtoMessage(inMsg)
+	inMsg2, err := proto.FromProtoMessageToInternalMessage(inMsg)
+	if err != nil {
+		packetDecodeErrorsTotal.Inc()
+		ep.l.Error("failed to convert to internal message", "error", err)
+		return
+	}
 
 	outMsg, err := ep.resolver.Resolve(ctx, inMsg2)
 	if err != nil {
-		ep.l.Error("failed to lookup :: error=%v", err)
+
+		if ep.writeErrorReponseToClientIfErrorOccurred {
+		}
+
+		packetProcessErrorsTotal.Inc()
+		ep.l.Error("failed to lookup", "error", err)
 		return
 	}
 
@@ -116,15 +143,20 @@ func (ep *UDPEndpoint) step(conn *net.UDPConn) {
 	outMsg2.Header.RecursionAvailable = true
 	outMsg2.Header.RecursionDesired = inMsg.Header.RecursionDesired
 
+	outMsg2.Question = []proto.Question{inMsg.Question[0]}
+
 	buf, err = enc.Encode(outMsg2)
 	if err != nil {
 		packetEncodeErrorsTotal.Inc()
-		ep.l.Error("failed to encode message :: error=%v", err)
+		ep.l.Error("failed to encode message", "error", err)
 		return
 	}
 
-	if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		ep.l.Error("failed to set write deadline :: error=%v", err)
+	deadline = time.Now().Add(ep.writeTimeout)
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		packetProcessErrorsTotal.Inc()
+		ep.l.Error("failed to set write deadline", "error", err)
+		return
 	}
 	if _, err := conn.WriteToUDP(buf, remoteAddr); err != nil {
 		ep.l.Error("failed to write to udp", "error", err)

@@ -6,7 +6,19 @@ import (
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
-// Resolver is an interface for resolving DNS queries.
-type Resolver interface {
+// HResolver is an interface for resolving DNS queries.
+type HResolver interface {
 	Resolve(context.Context, *proto.InternalMessage) (*proto.InternalMessage, error)
+}
+
+type Response struct {
+	Answer     []proto.ResourceRecord
+	Authority  []proto.ResourceRecord
+	Additional []proto.ResourceRecord
+}
+
+// LResolver is an high-level interface for resolving DNS queries
+// with a single question.
+type LResolver interface {
+	Resolve(context.Context, proto.Question) (Response, error)
 }

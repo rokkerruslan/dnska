@@ -2,16 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/netip"
+	"os"
+	"os/signal"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rokkerruslan/dnska/internal/resolvers/stub"
+	"github.com/rokkerruslan/dnska/internal/udp"
+	"github.com/rokkerruslan/dnska/pkg/debug"
 	"github.com/rokkerruslan/dnska/pkg/proto"
 )
 
@@ -28,7 +36,8 @@ func NewStressCommand() *cobra.Command {
 		Use:   "stress",
 		Short: "Run stress test for name server",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return stress(opts)
+			// return stress(opts)
+			return foo(opts.AttackedAddr, 1)
 		},
 	}
 
@@ -56,10 +65,6 @@ func NewStressCommand() *cobra.Command {
 }
 
 func stress(opts stressOpts) error {
-	// Concurrency level.
-	// Setup workers based on concurrency level.
-	// Prepare list and types of queries.
-
 	concurrency := int(opts.Concurrency)
 	if concurrency == 0 {
 		concurrency = 1
@@ -73,6 +78,8 @@ func stress(opts stressOpts) error {
 		return err
 	}
 
+	mpd := debug.NewFakeMalformedPacketDumper()
+
 	for n := 0; n < concurrency; n++ {
 		nn := n
 		go func() {
@@ -84,10 +91,16 @@ func stress(opts stressOpts) error {
 			totalRequests := 0
 			totalErrors := 0
 
+			udpConn, err := udp.NewConn(net.UDPAddrFromAddrPort(addr))
+			if err != nil {
+				logger.Error("failed to create UDP connection", "error", err)
+				return
+			}
+
 			resolver := stub.NewSimpleForwardUDPResolver(stub.SimpleForwardUDPResolverOpts{
-				ForwardAddr:          addr,
-				DumpMalformedPackets: true,
-				L:                    logger,
+				UdpConn:               udpConn,
+				SetRecursionDesired:   false,
+				MalformedPacketDumper: mpd,
 			})
 
 		loop:
@@ -117,7 +130,7 @@ func stress(opts stressOpts) error {
 					},
 				}
 
-				_, err := resolver.Resolve(context.Background(), proto.FromProtoMessage(in))
+				_, err := resolver.Resolve(context.Background(), proto.FromProtoMessage(&in))
 				if err != nil {
 					totalErrors++
 				}
@@ -130,4 +143,87 @@ func stress(opts stressOpts) error {
 	wg.Wait()
 
 	return nil
+}
+
+var dnsTemplate = []byte{
+	0x00, 0x00, // [0-1] Transaction ID (заполняется в рантайме)
+	0x01, 0x00, // [2-3] Flags: Standard query
+	0x00, 0x01, // [4-5] Questions: 1
+	0x00, 0x00, // [6-7] Answer RRs: 0
+	0x00, 0x00, // [8-9] Authority RRs: 0
+	0x00, 0x00, // [10-11] Additional RRs: 0
+	0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e',
+	0x03, 'c', 'o', 'm',
+	0x00,       // Name terminator
+	0x00, 0x01, // Type: A
+	0x00, 0x01, // Class: IN
+}
+
+func foo(target string, workers int) error {
+	raddr, err := net.ResolveUDPAddr("udp", target)
+	if err != nil {
+		fmt.Printf("Resolution error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Starting stress test against %s using %d workers...\n", target, workers)
+
+	var totalSent uint64
+	stopChan := make(chan struct{})
+
+	for i := 0; i < workers; i++ {
+		go func(workerID int) {
+			conn, err := net.DialUDP("udp", nil, raddr)
+			if err != nil {
+				fmt.Printf("Worker %d init error: %v\n", workerID, err)
+				return
+			}
+			defer conn.Close()
+
+			packet := make([]byte, len(dnsTemplate))
+			copy(packet, dnsTemplate)
+
+			txID := make([]byte, 2)
+
+			for {
+				select {
+				case <-stopChan:
+					return
+				default:
+					_, _ = rand.Read(txID)
+					packet[0] = txID[0]
+					packet[1] = txID[1]
+
+					_, err := conn.Write(packet)
+					if err == nil {
+						atomic.AddUint64(&totalSent, 1)
+					}
+				}
+			}
+		}(i)
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	lastSent := uint64(0)
+
+	for {
+		select {
+		case <-ticker.C:
+			currentTotal := atomic.LoadUint64(&totalSent)
+			pps := currentTotal - lastSent
+			lastSent = currentTotal
+			fmt.Printf("Total Packets Sent: %d | Speed: %d pps\n", currentTotal, pps)
+		case <-sigChan:
+			fmt.Println("\nStopping benchmarks...")
+			close(stopChan)
+			time.Sleep(500 * time.Millisecond)
+			fmt.Printf("Final count: %d packets sent.\n", atomic.LoadUint64(&totalSent))
+			return nil
+		}
+	}
 }

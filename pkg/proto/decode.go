@@ -3,86 +3,88 @@ package proto
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/rokkerruslan/dnska/pkg/bv"
 )
 
+// Decoder is a struct that provides functionality to decode DNS messages from byte slices.
 type Decoder struct{}
 
 func NewDecoder() *Decoder {
 	return &Decoder{}
 }
 
-func (dec *Decoder) Decode(in []byte) (Message, error) {
-	buf := bv.NewByteView(in)
+func (dec *Decoder) Decode(in []byte) (*Message, error) {
+	buf := bv.New(in)
 
 	var err error
 	var header Header
 
-	header.ID, err = buf.TakeUint16()
+	header.ID, err = buf.Uint16()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	flagsH, err := buf.Take()
+	flagsH, err := buf.Uint8()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	flagsL, err := buf.Take()
+	flagsL, err := buf.Uint8()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
 	header.Response = (flagsH & 0b10000000) != 0
 	header.Opcode = Opcode((flagsH & 0b01111000) >> 3)
 	header.AuthoritativeAnswer = (flagsH & 0b00000100) != 0
-	header.TruncateCation = (flagsH & 0b00000010) != 0
+	header.Truncated = (flagsH & 0b00000010) != 0
 	header.RecursionDesired = (flagsH & 0b00000001) != 0
 	header.RecursionAvailable = (flagsL & 0b10000000) != 0
 	header.RCode = RCode(flagsL & 0b00001111)
 
-	header.QDCount, err = buf.TakeUint16()
+	header.QDCount, err = buf.Uint16()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	header.ANCount, err = buf.TakeUint16()
+	header.ANCount, err = buf.Uint16()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	header.NSCount, err = buf.TakeUint16()
+	header.NSCount, err = buf.Uint16()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	header.ARCount, err = buf.TakeUint16()
+	header.ARCount, err = buf.Uint16()
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
 	questions, err := parseQuestion(buf, int(header.QDCount))
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
 	answers, err := decodeResourceRecords(buf, int(header.ANCount))
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
 	authorities, err := decodeResourceRecords(buf, int(header.NSCount))
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
 	additional, err := decodeResourceRecords(buf, int(header.ARCount))
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
 
-	return Message{
+	return &Message{
 		Header:     header,
 		Question:   questions,
 		Answer:     answers,
@@ -91,7 +93,7 @@ func (dec *Decoder) Decode(in []byte) (Message, error) {
 	}, nil
 }
 
-func parseQuestion(nb *bv.ByteView, n int) ([]Question, error) {
+func parseQuestion(nb *bv.BV, n int) ([]Question, error) {
 	out := make([]Question, 0, n)
 
 	for i := 0; i < n; i++ {
@@ -100,12 +102,12 @@ func parseQuestion(nb *bv.ByteView, n int) ([]Question, error) {
 			return nil, err
 		}
 
-		qType, err := nb.TakeUint16()
+		qType, err := nb.Uint16()
 		if err != nil {
 			return nil, err
 		}
 
-		qClass, err := nb.TakeUint16()
+		qClass, err := nb.Uint16()
 		if err != nil {
 			return nil, err
 		}
@@ -120,10 +122,10 @@ func parseQuestion(nb *bv.ByteView, n int) ([]Question, error) {
 	return out, nil
 }
 
-func decodeResourceRecords(nb *bv.ByteView, n int) ([]ResourceRecord, error) {
+func decodeResourceRecords(nb *bv.BV, n int) ([]ResourceRecord, error) {
 	out := make([]ResourceRecord, 0, n)
 
-	for i := 0; i < n; i++ {
+	for range n {
 		record, err := decodeResourceRecord(nb)
 		if err != nil {
 			return out, err
@@ -135,28 +137,28 @@ func decodeResourceRecords(nb *bv.ByteView, n int) ([]ResourceRecord, error) {
 	return out, nil
 }
 
-func decodeResourceRecord(nb *bv.ByteView) (ResourceRecord, error) {
+func decodeResourceRecord(nb *bv.BV) (ResourceRecord, error) {
 	name, err := decodeName(nb)
 	if err != nil {
 		return ResourceRecord{}, err
 	}
 
-	queryType, err := nb.TakeUint16()
+	queryType, err := nb.Uint16()
 	if err != nil {
 		return ResourceRecord{}, err
 	}
 
-	class, err := nb.TakeUint16()
+	class, err := nb.Uint16()
 	if err != nil {
 		return ResourceRecord{}, err
 	}
 
-	ttl, err := nb.TakeUint32()
+	ttl, err := nb.Uint32()
 	if err != nil {
 		return ResourceRecord{}, err
 	}
 
-	rdLength, err := nb.TakeUint16()
+	rdLength, err := nb.Uint16()
 	if err != nil {
 		return ResourceRecord{}, err
 	}
@@ -176,289 +178,199 @@ func decodeResourceRecord(nb *bv.ByteView) (ResourceRecord, error) {
 	}, nil
 }
 
-func decodeResourceData(nb *bv.ByteView, queryType QType, length uint16) (string, error) {
+func decodeResourceData(nb *bv.BV, queryType QType, length uint16) (string, error) {
+	startPos := nb.Pos()
+	var result string
+	var err error
+
 	switch queryType {
 	case QTypeA:
-		addr, err := nb.TakeUint32()
-		if err != nil {
-			return "", err
+		var addr uint32
+		addr, err = nb.Uint32()
+		if err == nil {
+			result = fmt.Sprintf(
+				"%d.%d.%d.%d",
+				uint8(addr>>24),
+				uint8(addr>>16),
+				uint8(addr>>8),
+				uint8(addr>>0),
+			)
 		}
 
-		return fmt.Sprintf(
-			"%d.%d.%d.%d",
-			uint8(addr>>24),
-			uint8(addr>>16),
-			uint8(addr>>8),
-			uint8(addr>>0),
-		), nil
-
-	case QTypeNS:
-		// A domain name which specifies a host which should be
-		// authoritative for the specified class and domain.
-
-		// NS records cause both the usual additional section processing to locate
-		// a type A record, and, when used in a referral, a special search of the
-		// zone in which they reside for glue information.
-
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
-		}
-
-		return name, nil
-
-	case QTypeMD:
-		// A <domain-name> which specifies a host which has a mail
-		// agent for the domain which should be able to deliver
-		// mail for the domain.
-
-		// MD records cause additional section processing which looks
-		// up an A type record corresponding to MADNAME.
-
-		// MD is obsolete.
-
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
-		}
-
-		return name, nil
-
-	case QTypeMF:
-		// A <domain-name> which specifies a host which has a mail
-		// agent for the domain which will accept mail for
-		// forwarding to the domain.
-
-		// MF is obsolete.
-
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
-		}
-
-		return name, nil
-
-	case QTypeCName:
-		// A domain name which specifies the canonical or primary
-		// name for the owner. The owner name is an alias.
-		cname, err := decodeName(nb)
-		if err != nil {
-			return "", err
-		}
-		return cname, nil
+	case QTypeNS, QTypeMD, QTypeMF, QTypeCName, QTypeMB, QTypeMG, QTypeMR, QTypePTR:
+		result, err = decodeName(nb)
 
 	case QTypeSOA:
-		buf, err := nb.TakeRange(nb.Pos(), uint(length))
-		if err != nil {
-			return "", err
+		var mname, rname string
+		mname, err = decodeName(nb)
+		if err == nil {
+			rname, err = decodeName(nb)
 		}
 
-		return string(buf), nil
-
-	case QTypeMB:
-		// A <domain-name> which specifies a host which has the
-		// specified mailbox.
-
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
+		var serial, refresh, retry, expire, minimum uint32
+		if err == nil {
+			serial, err = nb.Uint32()
 		}
-		return name, nil
-
-	case QTypeMG:
-		// A <domain-name> which specifies a mailbox which is a
-		// member of the mail group specified by the domain name.
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
+		if err == nil {
+			refresh, err = nb.Uint32()
 		}
-		return name, nil
-
-	case QTypeMR:
-		// A <domain-name> which specifies a mailbox which is the
-		// proper rename of the specified mailbox.
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
+		if err == nil {
+			retry, err = nb.Uint32()
 		}
-		return name, nil
+		if err == nil {
+			expire, err = nb.Uint32()
+		}
+		if err == nil {
+			minimum, err = nb.Uint32()
+		}
+
+		if err == nil {
+			result = fmt.Sprintf("%s %s %d %d %d %d %d", mname, rname, serial, refresh, retry, expire, minimum)
+		}
 
 	case QTypeNULL:
-		// Anything at all may be in the RDATA field so long as it
-		// is 65535 octets or less.
-
-		// NULL records cause no additional section processing.  NULL RRs are not
-		// allowed in master files.  NULLs are used as placeholders in some
-		// experimental extensions of the DNS.
-
-		bts, err := nb.TakeRange(nb.Pos(), uint(length))
-		if err != nil {
-			return "", err
+		var bts []byte
+		bts, err = nb.Range(nb.Pos(), uint(length))
+		if err == nil {
+			result = string(bts)
 		}
-
-		return string(bts), err
-
-	case QTypeWKS:
-
-	case QTypePTR:
-		// A domain name which points to some location in the
-		// domain name space.
-		name, err := decodeName(nb)
-		if err != nil {
-			return "", err
-		}
-
-		return name, nil
 
 	case QTypeHINFO:
-		// CPU A <character-string> which specifies the CPU type.
-		// OS A <character-string> which specifies the operating
-		// system type.
-
-		// Standard values for CPU and OS can be found in [RFC-1010].
-		//
-		// HINFO records are used to acquire general information
-		// about a host. The main use is for protocols such as FTP
-		// that can use special procedures when talking between
-		// machines or operating systems of the same type.
-
-		cpu, err := decodeCharacterString(nb)
-		if err != nil {
-			return "", err
+		var cpu, os string
+		cpu, err = decodeStr(nb)
+		if err == nil {
+			os, err = decodeStr(nb)
 		}
-
-		os, err := decodeCharacterString(nb)
-		if err != nil {
-			return "", err
+		if err == nil {
+			result = cpu + "|" + os
 		}
-
-		// todo: must ensure that "|" does not occur at the cpu and the os parts.
-		return cpu + "|" + os, nil
-
-	case QTypeMINFO:
-	case QTypeMX:
-	case QTypeTXT:
 
 	case QTypeAAAA:
-		// 128 bit IPv6 address is encoded in the data portion of an AAAA
-		// resource record in network byte order (high-order byte first).
-
-		bts, err := nb.TakeRange(nb.Pos(), 16)
-		if err != nil {
-			return "", err
-		}
-
-		hx := ""
-		for i, b := range bts {
-			if i%2 == 0 && i != 0 {
-				hx += ":"
+		var bts []byte
+		bts, err = nb.Range(nb.Pos(), 16)
+		if err == nil {
+			var hx strings.Builder
+			for i, b := range bts {
+				if i%2 == 0 && i != 0 {
+					hx.WriteString(":")
+				}
+				hx.WriteString(fmt.Sprintf("%02x", b))
 			}
-			hx += fmt.Sprintf("%02x", b)
+			result = hx.String()
 		}
-		nb.Advance(16)
 
-		return hx, nil
-
-	case QTypeAXFR:
-	case QTypeMAILB:
-	case QTypeMAILA:
-	case QTypeALL:
-		// todo: how to handle a request for all records?
+	default:
+		var bts []byte
+		bts, err = nb.Range(nb.Pos(), uint(length))
+		if err == nil {
+			result = string(bts)
+		}
 	}
 
-	buf, err := nb.TakeRange(nb.Pos(), uint(length))
 	if err != nil {
 		return "", err
 	}
-	nb.Advance(uint(length))
 
-	return string(buf), nil
+	nb.Seek(startPos + uint(length))
+
+	return result, nil
 }
 
 // decodeName ...
 //
 // <domain-name> is a domain name represented as a series of labels, and
 // terminated by a label with zero length.
-func decodeName(nb *bv.ByteView) (string, error) {
-	pos := nb.Pos()
+func decodeName(nb *bv.BV) (string, error) {
 
+	const maxJumps = 5
+	const mask = 0b11000000
+	const delim = "."
+
+	pos := nb.Pos()
 	jumped := false
-	maxJumps := 5
 	jumpsPerformed := 0
 
-	delim := ""
-	out := ""
+	var out strings.Builder
 
 	for {
-		if jumpsPerformed > maxJumps {
-			return "", errors.New("jumps limit reached")
-		}
-
 		length, err := nb.Index(pos)
 		if err != nil {
 			return "", err
 		}
 
-		if length&0xc0 == 0xc0 {
-			if !jumped {
-				nb.Seek(pos + 2)
-			}
-
+		// If the two most significant bits of the length byte are set, it indicates
+		// a pointer to another location in the message.
+		if length&mask == mask {
 			b2, err := nb.Index(pos + 1)
 			if err != nil {
 				return "", err
 			}
 
-			offset := (uint16(length^0xc0) << 8) | uint16(b2)
-			pos = uint(offset)
+			if !jumped {
+				nb.Seek(pos + 2)
+				jumped = true
+			}
 
-			jumped = true
+			offset := (uint16(length&^mask) << 8) | uint16(b2)
+
+			// offset must be at least 12 bytes into the message to avoid
+			// pointing into the header. It must also be less than the
+			// total length of the message to avoid pointing outside the message.
+			if offset < 12 || offset >= uint16(nb.Pos()) {
+				return "", errors.New("invalid offset in pointer")
+			}
+
+			pos = uint(offset)
 			jumpsPerformed++
 
+			// Detect and prevent infinite loops in case of malformed messages with circular pointers.
+			if jumpsPerformed > maxJumps {
+				return "", errors.New("jumps limit reached")
+			}
+
 			continue
-		} else {
-			pos++
-
-			if length == 0 {
-				break
-			}
-
-			out += delim
-			part, err := nb.TakeRange(pos, uint(length))
-			if err != nil {
-				return "", err
-			}
-
-			out += string(part)
-
-			delim = "."
-			pos += uint(length)
 		}
+
+		if length > 63 {
+			return "", errors.New("label length exceeds 63 bytes")
+		}
+
+		// Skip the length byte
+		pos++
+
+		// If the length is zero, it indicates the end of the domain name.
+		if length == 0 {
+			if !jumped {
+				nb.Seek(pos)
+			}
+			break
+		}
+
+		out.WriteString(delim)
+		part, err := nb.Range(pos, uint(length))
+		if err != nil {
+			return "", err
+		}
+
+		out.WriteString(string(part))
+		pos += uint(length)
 	}
 
-	if !jumped {
-		nb.Seek(pos)
-	}
-
-	return out, nil
+	return out.String(), nil
 }
 
-// decodeCharacterString ...
-//
-// <character-string> is a single length octet followed by
-// that number of characters.  <character-string> is treated
-// as binary information, and can be up to 256 characters in
-// length (including the length octet).
-func decodeCharacterString(nb *bv.ByteView) (string, error) {
-	length, err := nb.Take()
+func decodeStr(nb *bv.BV) (string, error) {
+	length, err := nb.Uint8()
 	if err != nil {
 		return "", err
 	}
 
-	buf, err := nb.TakeRange(nb.Pos(), uint(length))
+	buf, err := nb.Range(nb.Pos(), uint(length))
 	if err != nil {
 		return "", err
 	}
+
+	nb.Advance(uint(length))
 
 	return string(buf), nil
 }

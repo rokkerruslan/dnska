@@ -76,10 +76,10 @@ type Header struct {
 	// first owner name in the answer section.
 	AuthoritativeAnswer bool
 
-	// TruncateCation (TC) bit specifies that this message was truncated
+	// Truncated (TC) bit specifies that this message was truncated
 	// due to length greater than that permitted on the transmission
 	// channel.
-	TruncateCation bool
+	Truncated bool
 
 	// RecursionDesired bit may be set in a query and is copied
 	// into the response. If RD is set, it directs the name server

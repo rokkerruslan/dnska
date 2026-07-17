@@ -17,7 +17,7 @@ func TestLabelsIndex_EncodeName(t *testing.T) {
 
 	index := labelsIndex{}
 
-	buf := bv.NewByteView(make([]byte, limits.DefaultUDPPayloadSizeLimit))
+	buf := bv.New(make([]byte, limits.DefaultUDPPayloadSizeLimit))
 
 	if err := index.EncodeName(buf, s0); err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestLabelsIndex_EncodeName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := bv.NewByteView(buf.Bytes())
+	out := bv.New(buf.Bytes())
 
 	decodeIndex := labelsIndex{}
 
@@ -38,25 +38,25 @@ func TestLabelsIndex_EncodeName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testing2.Assert(t, s0got, "F.ISI.ARPA")
+	testing2.Check(t, s0got, "F.ISI.ARPA")
 
 	s1got, err := decodeIndex.DecodeName(out)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	testing2.Assert(t, s1got, "FOO.BAR.F.ISI.ARPA")
+	testing2.Check(t, s1got, "FOO.BAR.F.ISI.ARPA")
 
 	s2got, err := decodeIndex.DecodeName(out)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	testing2.Assert(t, s2got, "BAR.F.ISI.ARPA")
+	testing2.Check(t, s2got, "BAR.F.ISI.ARPA")
 }
 
 func TestExample(t *testing.T) {
-	b := bv.NewByteView(make([]byte, 512))
+	b := bv.New(make([]byte, 512))
 
 	li := labelsIndex{}
 
@@ -74,7 +74,7 @@ func TestExample(t *testing.T) {
 }
 
 func TestExample2(t *testing.T) {
-	b := bv.NewByteView(make([]byte, 512))
+	b := bv.New(make([]byte, 512))
 	li := labelsIndex{}
 
 	list := []string{
@@ -120,5 +120,5 @@ func TestExample2(t *testing.T) {
 
 	t.Log(spew.Sdump(b.Bytes()))
 
-	testing2.Assert(t, len(b.Bytes()), total)
+	testing2.Check(t, len(b.Bytes()), total)
 }

@@ -17,7 +17,7 @@ const (
 
 var errNoReport = errors.New("no report")
 
-func NewChainResolver(l *slog.Logger, list ...Resolver) Resolver {
+func NewChainResolver(l *slog.Logger, list ...HResolver) HResolver {
 	return &ChainResolver{
 		chain: list,
 		mode:  sequenceChainResolverMode,
@@ -26,7 +26,7 @@ func NewChainResolver(l *slog.Logger, list ...Resolver) Resolver {
 }
 
 type ChainResolver struct {
-	chain []Resolver
+	chain []HResolver
 	mode  chainResolverMode
 
 	l *slog.Logger
